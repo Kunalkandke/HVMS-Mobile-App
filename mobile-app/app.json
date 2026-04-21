@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "HVMS",
+    "slug": "hvms-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.college.hvms"
+    },
+    "android": {
+      "package": "com.college.hvms"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

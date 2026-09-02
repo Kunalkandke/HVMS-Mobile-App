@@ -1,10 +1,15 @@
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
 
-// ─── IMPORTANT: Change this to YOUR computer's IP address ────────────────────
+// ─── API Configuration ────────────────────────────────────────────────────────
+// For development: Change this to YOUR computer's IP address
 // Windows: open CMD → type ipconfig → look for IPv4 Address under WiFi
 // Mac: open Terminal → type ifconfig en0 → look for inet
-// Example: 'http://192.168.1.105:5000/api/v1'
-export const API_BASE_URL = 'http://192.168.1.67:5000/api/v1';
+// For production: Use your deployed backend URL
+const DEV_API_URL = 'http://192.168.1.67:5000/api/v1';
+const PROD_API_URL = 'https://your-backend-url.com/api/v1'; // Update this for production
+
+export const API_BASE_URL = __DEV__ ? DEV_API_URL : PROD_API_URL;
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function getToken() {

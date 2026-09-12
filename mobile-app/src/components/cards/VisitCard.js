@@ -5,17 +5,54 @@ import { theme, getStatusColor } from '../../utils/theme';
 import { formatDateTime, formatDuration, getPurposeLabel } from '../../utils/helpers';
 import { Badge } from '../common/UIComponents';
 
+/**
+ * VisitCard — shows a completed/active actual visit with full details.
+ * Used in VisitHistoryScreen and FacultyDashboardScreen (Recent Visits).
+ *
+ * Props:
+ *  visit       — visit object from visitService.getMyVisits()
+ *  onPress     — called with the visit object when card is tapped
+ *  showFaculty — show the faculty name row (for admin/warden views)
+ */
 export default function VisitCard({ visit, onPress, showFaculty = false }) {
   const statusColor = getStatusColor(visit.status);
-  const isActive = visit.status === 'active';
+  const isActive    = visit.status === 'active';
+  const isCompleted = visit.status === 'completed';
+
+  // Resolve the date to display.
+  // Prefer checkIn timestamp → else visitDate field → else check_in field
+  const visitDateObj = visit.checkIn
+    ? new Date(visit.checkIn)
+    : visit.check_in
+    ? new Date(visit.check_in)
+    : visit.visitDate
+    ? new Date(visit.visitDate + 'T00:00:00Z')
+    : null;
+
+  const visitDateStr = visitDateObj
+    ? visitDateObj.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        timeZone: visit.checkIn || visit.check_in ? undefined : 'UTC',
+      })
+    : '—';
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, isActive && styles.cardActive, isCompleted && styles.cardCompleted]}
       onPress={() => onPress && onPress(visit)}
       activeOpacity={0.88}
     >
-      {/* Header row */}
+      {/* Status banner for active visits */}
+      {isActive && (
+        <View style={styles.activeBanner}>
+          <View style={styles.pulseDot} />
+          <Text style={styles.activeBannerText}>Visit in progress — tap to manage</Text>
+        </View>
+      )}
+
+      {/* Header row: hostel name + status badge */}
       <View style={styles.header}>
         <View style={styles.hostelInfo}>
           <Ionicons name="business-outline" size={16} color={theme.colors.primary} />
@@ -30,14 +67,6 @@ export default function VisitCard({ visit, onPress, showFaculty = false }) {
         />
       </View>
 
-      {/* Active visit pulse indicator */}
-      {isActive && (
-        <View style={styles.activeBanner}>
-          <View style={styles.pulseDot} />
-          <Text style={styles.activeBannerText}>Visit in progress</Text>
-        </View>
-      )}
-
       {/* Faculty info (for admin/warden views) */}
       {showFaculty && visit.faculty && (
         <View style={styles.row}>
@@ -49,26 +78,44 @@ export default function VisitCard({ visit, onPress, showFaculty = false }) {
         </View>
       )}
 
-      {/* Purpose */}
+      {/* Date of visit */}
       <View style={styles.row}>
-        <Ionicons name="clipboard-outline" size={14} color={theme.colors.textMuted} />
-        <Text style={styles.metaText}>{getPurposeLabel(visit.purpose)}</Text>
+        <Ionicons name="calendar-outline" size={14} color={theme.colors.textMuted} />
+        <Text style={styles.metaText}>{visitDateStr}</Text>
       </View>
+
+      {/* Purpose */}
+      {visit.purpose && (
+        <View style={styles.row}>
+          <Ionicons name="clipboard-outline" size={14} color={theme.colors.textMuted} />
+          <Text style={styles.metaText}>{getPurposeLabel(visit.purpose)}</Text>
+        </View>
+      )}
 
       {/* Check-in time */}
-      <View style={styles.row}>
-        <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
-        <Text style={styles.metaText}>In: {formatDateTime(visit.checkIn)}</Text>
-      </View>
+      {(visit.checkIn || visit.check_in) && (
+        <View style={styles.row}>
+          <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
+          <Text style={styles.metaText}>In: {formatDateTime(visit.checkIn || visit.check_in)}</Text>
+        </View>
+      )}
 
-      {/* Check-out / duration */}
-      {visit.checkOut && (
+      {/* Check-out time + duration */}
+      {(visit.checkOut || visit.check_out) && (
         <View style={styles.row}>
           <Ionicons name="exit-outline" size={14} color={theme.colors.textMuted} />
           <Text style={styles.metaText}>
-            Out: {formatDateTime(visit.checkOut)}
-            {visit.duration ? ` • ${formatDuration(visit.duration)}` : ''}
+            Out: {formatDateTime(visit.checkOut || visit.check_out)}
+            {visit.duration ? ` · ${formatDuration(visit.duration)}` : ''}
           </Text>
+        </View>
+      )}
+
+      {/* Purpose detail / remarks preview */}
+      {visit.purposeDetail && (
+        <View style={styles.row}>
+          <Ionicons name="chatbubble-outline" size={14} color={theme.colors.textMuted} />
+          <Text style={styles.metaText} numberOfLines={2}>{visit.purposeDetail}</Text>
         </View>
       )}
 
@@ -83,7 +130,7 @@ export default function VisitCard({ visit, onPress, showFaculty = false }) {
       {/* Tap hint */}
       {onPress && (
         <View style={styles.tapHint}>
-          <Text style={styles.tapHintText}>Tap for details</Text>
+          <Text style={styles.tapHintText}>Tap for full details</Text>
           <Ionicons name="chevron-forward" size={13} color={theme.colors.textMuted} />
         </View>
       )}
@@ -99,23 +146,13 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
     ...theme.shadow.sm,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+  cardActive: {
+    borderWidth: 1.5,
+    borderColor: theme.colors.success + '60',
   },
-  hostelInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 8,
-  },
-  hostelName: {
-    fontSize: theme.fontSize.md,
-    fontWeight: theme.fontWeight.bold,
-    color: theme.colors.textPrimary,
-    marginLeft: 6,
+  cardCompleted: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   activeBanner: {
     flexDirection: 'row',
@@ -138,20 +175,39 @@ const styles = StyleSheet.create({
     fontWeight: theme.fontWeight.semiBold,
     color: theme.colors.success,
   },
-  row: {
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  hostelInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    flex: 1,
+    marginRight: 8,
+  },
+  hostelName: {
+    fontSize: theme.fontSize.md,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.textPrimary,
+    marginLeft: 6,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 5,
   },
   metaText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     marginLeft: 6,
+    flex: 1,
   },
   verifiedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    marginTop: 8,
   },
   verifiedText: {
     fontSize: theme.fontSize.xs,
@@ -163,7 +219,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginTop: 8,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
   },
   tapHintText: {
     fontSize: theme.fontSize.xs,

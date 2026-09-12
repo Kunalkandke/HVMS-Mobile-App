@@ -30,7 +30,7 @@ export default function AllVisitsScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
-  const LIMIT = 15;
+  const LIMIT = 10000;
 
   const fetchVisits = async (p = 1, reset = false) => {
     if (p === 1) setLoading(true);

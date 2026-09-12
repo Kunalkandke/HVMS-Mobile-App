@@ -4,7 +4,7 @@ const { auditLogger } = require('../middleware/helpers');
 // ─── GET ALL HOSTELS ─────────────────────────────────────────────────────────
 exports.getAll = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('hostels')
       .select(`
         *,
@@ -14,6 +14,21 @@ exports.getAll = async (req, res, next) => {
       .order('name', { ascending: true });
 
     if (error) throw new Error(error.message);
+
+    // If database has no active hostels, seed default Boys and Girls hostels
+    if (!data || data.length === 0) {
+      await supabase.from('hostels').insert([
+        { name: 'Boys Hostel', type: 'boys', capacity: 200, location: 'Campus Block A', is_active: true },
+        { name: 'Girls Hostel', type: 'girls', capacity: 200, location: 'Campus Block B', is_active: true },
+      ]);
+      const { data: seeded } = await supabase
+        .from('hostels')
+        .select(`*, warden:warden_id ( id, name, email, phone )`)
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+      data = seeded || [];
+    }
+
     res.json({ success: true, data: data || [] });
   } catch (err) { next(err); }
 };

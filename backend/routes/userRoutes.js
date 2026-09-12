@@ -7,12 +7,15 @@ const c = require('../controllers/userController');
 router.use(authMiddleware);
 router.use(authorizeRoles('admin'));
 
-router.get('/',                  c.getAllUsers);
-router.get('/:id',               c.getUserById);
-router.post('/',                 c.createUser);
-router.put('/:id',               c.updateUser);
-router.patch('/:id/status',      c.toggleUserStatus);
-router.patch('/:id/role',        c.changeUserRole);
-router.post('/:id/reset-password', c.resetPassword);
+router.get('/',                     c.getAllUsers);
+router.get('/faculty',              c.getFacultyUsers);       // ← Faculty Panel list
+router.get('/:id',                  c.getUserById);
+router.post('/',                    c.createUser);
+router.put('/:id',                  c.updateUser);
+router.patch('/:id/status',         c.toggleUserStatus);
+router.patch('/:id/role',           c.changeUserRole);
+router.patch('/:id/faculty-details', c.updateFacultyDetails); // ← Edit faculty details
+router.post('/:id/reset-password',  c.resetPassword);
 
 module.exports = router;
+

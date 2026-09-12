@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
   TouchableOpacity, ActivityIndicator, Alert, Modal,
-  FlatList,
+  FlatList, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { WebView } from 'react-native-webview';
 import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
 import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 import { formService } from '../../services/formService';
@@ -160,7 +161,9 @@ export default function FormFillScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { user } = useAuth();
-  const { visitId, formType, visitData, existingData, readOnly } = route.params || {};
+  const { formType, visitData, existingData, readOnly } = route.params || {};
+  // Resolve visitId: prefer explicit param, fall back to visitData.id or visitData._id
+  const visitId = route.params?.visitId || visitData?.id || visitData?._id;
 
   const [data, setData] = useState(() => buildInitialData(visitData, existingData));
   const [errors, setErrors] = useState({});
@@ -168,16 +171,71 @@ export default function FormFillScreen() {
   const [showPreview, setShowPreview] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [printLoading, setPrintLoading] = useState(false);
-  const [formSaved, setFormSaved] = useState(!!existingData); // Track if form has been saved
+  const [formSaved, setFormSaved] = useState(!!existingData);
+  // Export modal state — holds the generated file URI + type so user can Download or Share
+  const [exportModal, setExportModal] = useState(null); // { uri, mimeType, fileName, label } | null
 
-  // Validate visitId on mount
+  // Request storage permission on mount
   useEffect(() => {
     if (!visitId) {
       console.error('[FormFillScreen] Missing visitId!', route.params);
       Toast.show({ type: 'error', text1: 'Error', text2: 'Visit ID is missing. Please try again.' });
       navigation.goBack();
+      return;
     }
-  }, [visitId]);
+    loadSavedForm();
+    MediaLibrary.requestPermissionsAsync().catch(() => {});
+  }, [visitId, formType, existingData]);
+
+  // Normalize keys from backend (handles both camelCase and snake_case)
+  const normalizeFormData = (raw) => {
+    if (!raw || typeof raw !== 'object') return {};
+    const out = { ...raw };
+    const keyMap = {
+      antiRaggingSuggestions:  'antiragging_suggestions',
+      otherSuggestions:        'other_suggestions',
+      disciplineStatus:        'discipline_status',
+      cleanlinessStatus:       'cleanliness_status',
+      environmentStatus:       'environment_status',
+      seniorInteraction:       'senior_interaction',
+      fresherInteraction:      'fresher_interaction',
+      mealType:                'meal_type',
+      menuItems:               'menu_items',
+      tastedFood:              'tasted_food',
+      platesClean:             'plates_clean',
+      foodHot:                 'food_hot',
+      foodRemarks:             'food_remarks',
+      overallFeedback:         'overall_feedback',
+      improvementSuggestions:  'improvement_suggestions',
+    };
+    Object.entries(keyMap).forEach(([camel, snake]) => {
+      if (out[camel] !== undefined && out[snake] === undefined) {
+        out[snake] = out[camel];
+      }
+    });
+    return out;
+  };
+
+  const loadSavedForm = async () => {
+    if (existingData) {
+      setData(d => ({ ...d, ...normalizeFormData(existingData) }));
+      setFormSaved(true);
+    }
+    try {
+      const res = await formService.getForms(visitId);
+      if (res.success && res.data?.forms) {
+        const forms = res.data.forms;
+        const saved = forms.find(f => (f.formType || f.form_type) === formType);
+        if (saved && saved.data) {
+          const norm = normalizeFormData(saved.data);
+          setData(d => ({ ...d, ...norm }));
+          setFormSaved(true);
+        }
+      }
+    } catch (err) {
+      console.warn('[FormFillScreen] loadSavedForm error:', err.message);
+    }
+  };
 
   const isAntiRagging = formType === 'anti_ragging';
   const formTitle = isAntiRagging ? 'Anti-Ragging Committee' : 'Mess Food Quality Inspection';
@@ -218,17 +276,15 @@ export default function FormFillScreen() {
     }
     setSaving(true);
     try {
-      console.log('[FormFillScreen] Saving form:', { visitId, formType });
       const res = await formService.submitForm(visitId, formType, data);
-      console.log('[FormFillScreen] Save response:', res);
       if (res.success) {
         setFormSaved(true);
         Toast.show({ type: 'success', text1: 'Form Saved!', text2: 'You can now download the Word document.' });
+        loadSavedForm();
       } else {
         Toast.show({ type: 'error', text1: 'Save Failed', text2: res.message || 'Unknown error' });
       }
     } catch (err) {
-      console.error('[FormFillScreen] Save error:', err);
       Toast.show({ type: 'error', text1: 'Error', text2: err.message || 'Could not save form' });
     } finally {
       setSaving(false);
@@ -242,9 +298,13 @@ export default function FormFillScreen() {
         ? generateAntiRaggingHTML(visitData, data)
         : generateMessFeedbackHTML(visitData, data);
       const { uri } = await Print.printToFileAsync({ html, base64: false });
-      await Sharing.shareAsync(uri, {
+      const safeName = formTitle.replace(/[^a-z0-9]/gi, '_');
+      setExportModal({
+        uri,
         mimeType: 'application/pdf',
-        dialogTitle: `${formTitle} - PDF`,
+        fileName: `${safeName}_${Date.now()}.pdf`,
+        label: `${formTitle} — PDF`,
+        type: 'pdf',
       });
     } catch (err) {
       Toast.show({ type: 'error', text1: 'PDF Failed', text2: err.message || 'Could not generate PDF' });
@@ -254,53 +314,42 @@ export default function FormFillScreen() {
   };
 
   const handleDownloadDocx = async () => {
-    // First verify form was actually saved by fetching it
     setDownloading(true);
     try {
-      console.log('[FormFillScreen] Checking forms for download:', { visitId, formType });
-
-      // Check if form exists on server before attempting download
       const formsRes = await formService.getForms(visitId);
-      console.log('[FormFillScreen] getForms response:', formsRes);
-
       if (!formsRes.success) {
         Toast.show({ type: 'error', text1: 'Error', text2: formsRes.message || 'Could not verify form status' });
-        setDownloading(false);
         return;
       }
-
       const forms = formsRes.data?.forms || [];
-      // Check both camelCase (formType) and snake_case (form_type) due to normalization
-      console.log('[FormFillScreen] Found forms:', forms.map(f => f.formType || f.form_type));
-
       const savedForm = forms.find(f => (f.formType || f.form_type) === formType);
       if (!savedForm) {
         Toast.show({
           type: 'error',
           text1: 'Save First',
-          text2: `No ${formType} form found. Please save the form first.`
+          text2: `Please save the form before downloading.`,
         });
-        setDownloading(false);
         return;
       }
 
-      console.log('[FormFillScreen] Downloading form:', { visitId, formType });
       const token = await SecureStore.getItemAsync('hvms_token');
       const url = formService.getDownloadUrl(visitId, formType);
-      const dest = `${FileSystem.documentDirectory}${formType}_form_${Date.now()}.docx`;
+      const safeName = formTitle.replace(/[^a-z0-9]/gi, '_');
+      const fileName = `${safeName}_${Date.now()}.docx`;
+      const dest = `${FileSystem.cacheDirectory}${fileName}`;
       const result = await FileSystem.downloadAsync(url, dest, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
-      console.log('[FormFillScreen] Download result status:', result.status);
-
       if (result.status === 200) {
-        await Sharing.shareAsync(result.uri, {
+        setExportModal({
+          uri: result.uri,
           mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          dialogTitle: `${formTitle} - Word Document`,
+          fileName,
+          label: `${formTitle} — Word Document`,
+          type: 'docx',
         });
       } else {
-        // Try to read error message from response
         let errorMsg = 'Download failed';
         try {
           const errorContent = await FileSystem.readAsStringAsync(result.uri);
@@ -311,10 +360,115 @@ export default function FormFillScreen() {
         Toast.show({ type: 'error', text1: 'Download Failed', text2: errorMsg });
       }
     } catch (err) {
-      console.error('[FormFillScreen] Download error:', err);
       Toast.show({ type: 'error', text1: 'Error', text2: err.message || 'Download failed' });
     } finally {
       setDownloading(false);
+    }
+  };
+
+  // ─── Save file to device local storage directly (Automatic Download) ─────────
+  const handleSaveToDevice = async () => {
+    if (!exportModal) return;
+    try {
+      if (Platform.OS === 'android') {
+        let directoryUri = await SecureStore.getItemAsync('hvms_download_dir_uri');
+
+        // Request directory location once if not remembered
+        if (!directoryUri) {
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          if (permissions.granted) {
+            directoryUri = permissions.directoryUri;
+            await SecureStore.setItemAsync('hvms_download_dir_uri', directoryUri);
+          } else {
+            Toast.show({ type: 'info', text1: 'Download Cancelled' });
+            return;
+          }
+        }
+
+        // Directly create and write file into remembered directory without folder picker redirect
+        try {
+          const base64 = await FileSystem.readAsStringAsync(exportModal.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          const createdUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            directoryUri,
+            exportModal.fileName,
+            exportModal.mimeType
+          );
+          await FileSystem.writeAsStringAsync(createdUri, base64, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          setExportModal(null);
+          Toast.show({
+            type: 'success',
+            text1: '✅ Downloaded Successfully!',
+            text2: `Saved: ${exportModal.fileName}`,
+          });
+          return;
+        } catch (writeErr) {
+          console.warn('[handleSaveToDevice] SAF write retry:', writeErr.message);
+          // If stored URI expired or revoked, prompt once to refresh location
+          await SecureStore.deleteItemAsync('hvms_download_dir_uri').catch(() => {});
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          if (permissions.granted) {
+            directoryUri = permissions.directoryUri;
+            await SecureStore.setItemAsync('hvms_download_dir_uri', directoryUri);
+            const base64 = await FileSystem.readAsStringAsync(exportModal.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            const createdUri = await FileSystem.StorageAccessFramework.createFileAsync(
+              directoryUri,
+              exportModal.fileName,
+              exportModal.mimeType
+            );
+            await FileSystem.writeAsStringAsync(createdUri, base64, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+
+            setExportModal(null);
+            Toast.show({
+              type: 'success',
+              text1: '✅ Downloaded Successfully!',
+              text2: `Saved: ${exportModal.fileName}`,
+            });
+            return;
+          }
+        }
+      }
+
+      // iOS fallback: Save to app document directory
+      const destDir = `${FileSystem.documentDirectory}HVMS_Forms/`;
+      await FileSystem.makeDirectoryAsync(destDir, { intermediates: true }).catch(() => {});
+      const destPath = `${destDir}${exportModal.fileName}`;
+      await FileSystem.copyAsync({ from: exportModal.uri, to: destPath });
+
+      setExportModal(null);
+      Toast.show({
+        type: 'success',
+        text1: '✅ Downloaded Successfully!',
+        text2: `Saved: ${exportModal.fileName}`,
+      });
+    } catch (err) {
+      console.error('[handleSaveToDevice] Error:', err);
+      Toast.show({
+        type: 'error',
+        text1: 'Save Failed',
+        text2: err.message || 'Could not save file directly to device',
+      });
+    }
+  };
+
+  // ─── Share file via system share sheet ──────────────────────────────────────
+  const handleShareFile = async () => {
+    if (!exportModal) return;
+    try {
+      await Sharing.shareAsync(exportModal.uri, {
+        mimeType: exportModal.mimeType,
+        dialogTitle: exportModal.label,
+      });
+    } catch (err) {
+      Toast.show({ type: 'error', text1: 'Share Failed', text2: err.message || 'Could not share file' });
     }
   };
 
@@ -497,6 +651,83 @@ export default function FormFillScreen() {
           />
         </SafeAreaView>
       </Modal>
+
+      {/* ─── Export Modal: Download / Share ─────────────────────────── */}
+      <Modal
+        visible={!!exportModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setExportModal(null)}
+      >
+        <TouchableOpacity
+          style={styles.exportOverlay}
+          activeOpacity={1}
+          onPress={() => setExportModal(null)}
+        >
+          <View style={styles.exportSheet}>
+            {/* Handle bar */}
+            <View style={styles.exportHandle} />
+
+            {/* File info */}
+            <View style={styles.exportIconRow}>
+              <View style={[
+                styles.exportIconCircle,
+                { backgroundColor: exportModal?.type === 'pdf' ? '#e53935' : '#1976d2' },
+              ]}>
+                <Ionicons
+                  name={exportModal?.type === 'pdf' ? 'document-text' : 'document'}
+                  size={32}
+                  color="#fff"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.exportLabel}>{exportModal?.label}</Text>
+                <Text style={styles.exportFileName} numberOfLines={1}>
+                  {exportModal?.fileName}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.exportHint}>
+              File is ready. Choose what to do with it:
+            </Text>
+
+            {/* Download button */}
+            <TouchableOpacity
+              style={[styles.exportBtn, styles.exportBtnDownload]}
+              onPress={handleSaveToDevice}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="download-outline" size={22} color="#fff" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.exportBtnTitle}>Save to Device</Text>
+                <Text style={styles.exportBtnSub}>Save in HVMS Forms folder in your storage</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Share button */}
+            <TouchableOpacity
+              style={[styles.exportBtn, styles.exportBtnShare]}
+              onPress={handleShareFile}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="share-social-outline" size={22} color={theme.colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.exportBtnTitle, { color: theme.colors.primary }]}>Share File</Text>
+                <Text style={styles.exportBtnSub}>Send via WhatsApp, Gmail, Drive, etc.</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Cancel */}
+            <TouchableOpacity
+              style={styles.exportCancel}
+              onPress={() => setExportModal(null)}
+            >
+              <Text style={styles.exportCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -624,4 +855,91 @@ const styles = StyleSheet.create({
   },
   previewTitle: { color: '#fff', fontSize: 15, fontWeight: '700', flex: 1 },
   previewClose: { padding: 4 },
+
+  // ─── Export bottom-sheet styles ───────────────────────────────────────────
+  exportOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  exportSheet: {
+    backgroundColor: theme.colors.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: 36,
+  },
+  exportHandle: {
+    width: 44, height: 4,
+    backgroundColor: theme.colors.border,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  exportIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 12,
+  },
+  exportIconCircle: {
+    width: 60, height: 60,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  exportLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginBottom: 2,
+  },
+  exportFileName: {
+    fontSize: 11,
+    color: theme.colors.textMuted,
+  },
+  exportHint: {
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    marginBottom: 16,
+    lineHeight: 19,
+  },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 10,
+  },
+  exportBtnDownload: {
+    backgroundColor: theme.colors.success,
+  },
+  exportBtnShare: {
+    backgroundColor: theme.colors.primary + '12',
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary + '30',
+  },
+  exportBtnTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 1,
+  },
+  exportBtnSub: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  exportCancel: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  exportCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
+  },
 });
+

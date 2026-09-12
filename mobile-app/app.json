@@ -10,7 +10,17 @@
       "package": "com.college.hvms",
       "versionCode": 1
     },
-    "plugins": ["expo-secure-store"],
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow HVMS to save forms to your device.",
+          "savePhotosPermission": "Allow HVMS to save forms to your device.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "eef3511f-a24d-409a-95b9-694aaa42e5ed"

@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import Toast from 'react-native-toast-message';
 import AppHeader from '../../components/common/AppHeader';
 import InputField from '../../components/common/InputField';
@@ -16,11 +16,13 @@ import { PURPOSE_OPTIONS } from '../../utils/helpers';
 
 export default function StartVisitScreen() {
   const navigation = useNavigation();
+  const route = useRoute();
+  const { hostelId: passedHostelId, hostelName: passedHostelName, hostelType: passedHostelType } = route.params || {};
 
   const [hostels, setHostels] = useState([]);
   const [hostelOptions, setHostelOptions] = useState([]);
   const [form, setForm] = useState({
-    hostelId: '',
+    hostelId: passedHostelId || '',
     purpose: '',
     purposeDetail: '',
     facultyRemarks: '',
@@ -37,11 +39,27 @@ export default function StartVisitScreen() {
     try {
       const res = await hostelService.getAllHostels();
       if (res.success) {
-        setHostels(res.data);
-        setHostelOptions(res.data.map((h) => ({
+        const list = res.data || [];
+        setHostels(list);
+        setHostelOptions(list.map((h) => ({
           label: `${h.name} (${h.type === 'boys' ? 'Boys' : 'Girls'})`,
           value: h._id || h.id,
         })));
+
+        // Autofill logic from visit details:
+        if (passedHostelId) {
+          const match = list.find((h) => (h._id || h.id) === passedHostelId);
+          if (match) {
+            setForm((f) => ({ ...f, hostelId: match._id || match.id }));
+          }
+        } else if (passedHostelType) {
+          const match = list.find((h) => h.type === passedHostelType);
+          if (match) {
+            setForm((f) => ({ ...f, hostelId: match._id || match.id }));
+          }
+        } else if (list.length === 1) {
+          setForm((f) => ({ ...f, hostelId: list[0]._id || list[0].id }));
+        }
       }
     } catch (err) {
       Toast.show({ type: 'error', text1: 'Error', text2: 'Could not load hostels' });
@@ -90,7 +108,7 @@ export default function StartVisitScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <AppHeader title="Start Visit" subtitle="Check in to a hostel" showBack />
+      <AppHeader title="Start Visit Form" subtitle="Fill visit purpose & remarks" showBack />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -98,14 +116,14 @@ export default function StartVisitScreen() {
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {/* Info banner */}
           <View style={styles.infoBanner}>
-            <Text style={styles.infoTitle}>Check-in Instructions</Text>
+            <Text style={styles.infoTitle}>Check-in Details</Text>
             <Text style={styles.infoText}>
-              Select the hostel and purpose for your visit. A warden will be notified upon check-out.
+              Hostel is auto-selected from your visit schedule. Fill in your visit purpose and remarks to begin.
             </Text>
           </View>
 
           <SelectPicker
-            label="Select Hostel"
+            label="Hostel (Auto-filled from Visit)"
             value={form.hostelId}
             onSelect={(v) => set('hostelId', v)}
             options={hostelOptions}
@@ -118,10 +136,10 @@ export default function StartVisitScreen() {
           {/* Hostel detail preview */}
           {selectedHostel && (
             <View style={styles.hostelPreview}>
-              <Text style={styles.hostelPreviewName}>{selectedHostel.name}</Text>
+              <Text style={styles.hostelPreviewName}>🏠 {selectedHostel.name}</Text>
               <Text style={styles.hostelPreviewMeta}>
                 {selectedHostel.type === 'boys' ? 'Boys Hostel' : 'Girls Hostel'} •{' '}
-                {selectedHostel.location}
+                {selectedHostel.location || 'Main Campus'}
                 {selectedHostel.capacity ? ` • Capacity: ${selectedHostel.capacity}` : ''}
               </Text>
             </View>

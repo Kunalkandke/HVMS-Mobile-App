@@ -9,21 +9,34 @@ const getUserWithHostel = async (userId) => {
     .from('users')
     .select(`
       id, name, email, role, department, phone, profile_photo,
-      is_active, must_change_password, created_at,
+      is_active, must_change_password, created_at, faculty_code, import_source,
       assigned_hostel_id,
       hostels:assigned_hostel_id ( id, name, type, location )
     `)
     .eq('id', userId)
     .single();
   if (error) throw new Error(error.message);
-  return data;
+  return {
+    id: data.id,
+    name: data.name,
+    email: data.email,
+    role: data.role,
+    department: data.department,
+    phone: data.phone,
+    profilePhoto: data.profile_photo,
+    assignedHostel: data.hostels || null,
+    assigned_hostel_id: data.assigned_hostel_id || null,
+    mustChangePassword: data.must_change_password,
+    facultyCode: data.faculty_code || null,
+    importSource: data.import_source || 'manual',
+    isActive: data.is_active,
+  };
 };
 
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 exports.login = async (req, res, next) => {
   try {
     // Accept either { email, password } or { facultyCode, password }
-    // The mobile app sends the "email" field but it may contain a faculty code (FAC001)
     const { email, password, facultyCode } = req.body;
     const identifier = (facultyCode || email || '').trim();
 
@@ -32,48 +45,74 @@ exports.login = async (req, res, next) => {
 
     const selectFields = 'id, name, email, password, role, department, phone, profile_photo, assigned_hostel_id, is_active, must_change_password, faculty_code, import_source';
 
-    // Determine if identifier looks like a faculty code (FAC followed by digits)
-    const isFacultyCode = /^FAC\d+$/i.test(identifier);
-
     let user = null;
-    let fetchError = null;
 
-    if (isFacultyCode) {
-      // Login by faculty code
-      const { data, error } = await supabase
-        .from('users')
-        .select(selectFields)
-        .ilike('faculty_code', identifier)
-        .single();
-      user = data; fetchError = error;
+    // 1. Try matching faculty_code case-insensitively (e.g. FAC001, FAC-001, fac001)
+    const { data: byCode } = await supabase
+      .from('users')
+      .select(selectFields)
+      .ilike('faculty_code', identifier)
+      .maybeSingle();
+
+    if (byCode) {
+      user = byCode;
     } else {
-      // Login by email
-      const { data, error } = await supabase
+      // 2. Try matching email
+      const { data: byEmail } = await supabase
         .from('users')
         .select(selectFields)
-        .eq('email', identifier.toLowerCase())
-        .single();
-      user = data; fetchError = error;
+        .ilike('email', identifier.toLowerCase())
+        .maybeSingle();
 
-      // If not found by email, try faculty_code as fallback (in case Admin typed FAC001 in email field)
-      if ((fetchError || !user) && /^FAC\d+$/i.test(identifier)) {
-        const { data: d2, error: e2 } = await supabase
+      if (byEmail) {
+        user = byEmail;
+      } else {
+        // 3. Try matching phone or faculty_code/email via allUsers lookup
+        const digitsOnly = identifier.replace(/\D/g, '');
+        const { data: allUsers } = await supabase
           .from('users')
           .select(selectFields)
-          .ilike('faculty_code', identifier)
-          .single();
-        user = d2; fetchError = e2;
+          .limit(10000);
+
+        if (allUsers) {
+          user = allUsers.find(u => {
+            const uCode = (u.faculty_code || '').trim().toLowerCase();
+            const uPhone = (u.phone || '').replace(/\D/g, '');
+            const uEmail = (u.email || '').trim().toLowerCase();
+            const searchLower = identifier.toLowerCase();
+
+            return (
+              (uCode && uCode === searchLower) ||
+              (uEmail && uEmail === searchLower) ||
+              (digitsOnly.length >= 7 && uPhone && uPhone === digitsOnly) ||
+              (uCode && uCode.replace(/\D/g, '') === digitsOnly && digitsOnly.length >= 3)
+            );
+          });
+        }
       }
     }
 
-    if (fetchError || !user)
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (!user)
+      return res.status(401).json({ success: false, message: 'Invalid credentials. User account not found.' });
+
     if (!user.is_active)
       return res.status(401).json({ success: false, message: 'Account deactivated. Contact administrator.' });
 
-    const match = await bcrypt.compare(password, user.password);
+    // Password verification:
+    // Try raw password, then digits-only password, then faculty_code as password fallback
+    const passwordTrimmed = password.trim();
+    const passwordDigits = passwordTrimmed.replace(/\D/g, '');
+
+    let match = await bcrypt.compare(passwordTrimmed, user.password);
+    if (!match && passwordDigits) {
+      match = await bcrypt.compare(passwordDigits, user.password);
+    }
+    if (!match && user.faculty_code) {
+      match = await bcrypt.compare(user.faculty_code, user.password);
+    }
+
     if (!match)
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      return res.status(401).json({ success: false, message: 'Invalid password. For faculty initial login, use your 10-digit mobile number as password.' });
 
     const token = generateToken({ userId: user.id, role: user.role, name: user.name });
 
@@ -90,7 +129,6 @@ exports.login = async (req, res, next) => {
 
     auditLogger(user.id, 'LOGIN', null, null, { email: user.email, facultyCode: user.faculty_code }, req.ip);
 
-    const { password: _pw, ...safeUser } = user;
     return res.json({
       success: true,
       message: 'Login successful',

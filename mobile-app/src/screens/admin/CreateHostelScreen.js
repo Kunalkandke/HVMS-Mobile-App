@@ -38,7 +38,7 @@ export default function CreateHostelScreen() {
   const [wardens, setWardens] = useState([]);
 
   useEffect(() => {
-    userService.getAllUsers({ role: 'warden', limit: 100 })
+    userService.getAllUsers({ role: 'warden', limit: 10000 })
       .then(res => { if (res.success) setWardens(res.data.users || []); })
       .catch(() => {});
   }, []);

@@ -34,6 +34,10 @@ import ScheduleManagementScreen from '../screens/admin/ScheduleManagementScreen'
 import WardenDashboardScreen from '../screens/warden/WardenDashboardScreen';
 import WardenVisitsScreen from '../screens/warden/WardenVisitsScreen';
 
+// Hostel / Schedule Dashboard Screens
+import HostelListScreen from '../screens/hostel/HostelListScreen';
+import HostelVisitsScreen from '../screens/hostel/HostelVisitsScreen';
+
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
@@ -160,6 +164,10 @@ export default function MainNavigator() {
 
       {/* Faculty schedule */}
       <Stack.Screen name="FacultySchedule" component={FacultyScheduleScreen} />
+
+      {/* Hostel / Schedule screens */}
+      <Stack.Screen name="HostelList" component={HostelListScreen} />
+      <Stack.Screen name="HostelVisits" component={HostelVisitsScreen} />
 
       {/* Admin screens */}
       <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />

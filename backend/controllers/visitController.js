@@ -23,7 +23,7 @@ const getVisitFull = async (visitId) => {
 // ─── START VISIT ─────────────────────────────────────────────────────────────
 exports.startVisit = async (req, res, next) => {
   try {
-    const { hostelId, purpose, purposeDetail, facultyRemarks } = req.body;
+    const { hostelId, purpose, purposeDetail, facultyRemarks, scheduledVisitId } = req.body;
     if (!hostelId || !purpose)
       return res.status(400).json({ success: false, message: 'Hostel and purpose are required' });
 
@@ -41,7 +41,7 @@ exports.startVisit = async (req, res, next) => {
     // Verify hostel exists and is active
     const { data: hostel, error: hostelErr } = await supabase
       .from('hostels')
-      .select('id, name')
+      .select('id, name, type')
       .eq('id', hostelId)
       .eq('is_active', true)
       .single();
@@ -68,6 +68,22 @@ exports.startVisit = async (req, res, next) => {
       .single();
 
     if (visitErr) throw new Error(visitErr.message);
+
+    // Link scheduled_visits if scheduledVisitId provided or matching today's visit
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (scheduledVisitId) {
+      await supabase
+        .from('scheduled_visits')
+        .update({ actual_visit_id: visit.id, status: 'started' })
+        .eq('id', scheduledVisitId);
+    } else {
+      await supabase
+        .from('scheduled_visits')
+        .update({ actual_visit_id: visit.id, status: 'started' })
+        .eq('faculty_user_id', req.user.id)
+        .eq('visit_date', todayStr)
+        .eq('status', 'scheduled');
+    }
 
     auditLogger(req.user.id, 'START_VISIT', visit.id, 'Visit', { hostelId, purpose }, req.ip);
     res.status(201).json({ success: true, message: 'Visit started successfully', data: visit });
@@ -115,6 +131,12 @@ exports.endVisit = async (req, res, next) => {
 
     if (updateErr) throw new Error(updateErr.message);
 
+    // Update scheduled_visits status to completed
+    await supabase
+      .from('scheduled_visits')
+      .update({ status: 'completed' })
+      .eq('actual_visit_id', visit.id);
+
     auditLogger(req.user.id, 'END_VISIT', visit.id, 'Visit', { duration }, req.ip);
 
     // Notify warden via email (non-blocking)
@@ -148,7 +170,7 @@ exports.endVisit = async (req, res, next) => {
 // ─── GET MY VISITS (faculty) ─────────────────────────────────────────────────
 exports.getMyVisits = async (req, res, next) => {
   try {
-    const { status, hostelId, from, to, page = 1, limit = 12 } = req.query;
+    const { status, hostelId, from, to, page = 1, limit = 10000 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = supabase
@@ -213,7 +235,7 @@ exports.getActiveVisits = async (req, res, next) => {
 // ─── GET ALL VISITS (admin) ───────────────────────────────────────────────────
 exports.getAllVisits = async (req, res, next) => {
   try {
-    const { status, hostelId, facultyId, from, to, page = 1, limit = 15 } = req.query;
+    const { status, hostelId, facultyId, from, to, page = 1, limit = 10000 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = supabase
@@ -262,7 +284,7 @@ exports.getHostelVisits = async (req, res, next) => {
     if (!req.user.assignedHostelId) {
       return res.json({ success: true, data: { visits: [], pagination: { total: 0, page: 1, pages: 1 } } });
     }
-    const { status, page = 1, limit = 15 } = req.query;
+    const { status, page = 1, limit = 10000 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = supabase

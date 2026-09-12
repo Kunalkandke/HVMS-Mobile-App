@@ -16,9 +16,47 @@ export const LOCATIONS = [
   { label: 'SJB/SBP', key: 'sjb' },
 ];
 
+// ─── Normalize form data payload (handles camelCase <-> snake_case compatibility)
+export function normalizeFormData(d) {
+  if (!d) return {};
+  const res = { ...d };
+
+  // Anti-Ragging fields
+  if (d.disciplineStatus && !d.discipline_status) res.discipline_status = d.disciplineStatus;
+  if (d.cleanlinessStatus && !d.cleanliness_status) res.cleanliness_status = d.cleanlinessStatus;
+  if (d.environmentStatus && !d.environment_status) res.environment_status = d.environmentStatus;
+  if (d.seniorInteraction && !d.senior_interaction) res.senior_interaction = d.seniorInteraction;
+  if (d.fresherInteraction && !d.fresher_interaction) res.fresher_interaction = d.fresherInteraction;
+  if (d.antiraggingSuggestions && !d.antiragging_suggestions) res.antiragging_suggestions = d.antiraggingSuggestions;
+  if (d.otherSuggestions && !d.other_suggestions) res.other_suggestions = d.otherSuggestions;
+
+  // Mess Feedback fields
+  if (d.mealType && !d.meal_type) res.meal_type = d.mealType;
+  if (d.tastedFood && !d.tasted_food) res.tasted_food = d.tastedFood;
+  if (d.menuItems && !d.menu_items) res.menu_items = d.menuItems;
+  if (d.platesClean && !d.plates_clean) res.plates_clean = d.platesClean;
+  if (d.foodHot && !d.food_hot) res.food_hot = d.foodHot;
+  if (d.foodRemarks && !d.food_remarks) res.food_remarks = d.foodRemarks;
+  if (d.overallFeedback && !d.overall_feedback) res.overall_feedback = d.overallFeedback;
+  if (d.improvementSuggestions && !d.improvement_suggestions) res.improvement_suggestions = d.improvementSuggestions;
+
+  // Location fields
+  ['srth', 'svh', 'tara', 'sjb'].forEach(loc => {
+    const timeCamel = `loc${loc.charAt(0).toUpperCase() + loc.slice(1)}Time`;
+    const timeSnake = `loc_${loc}_time`;
+    if (d[timeCamel] && !d[timeSnake]) res[timeSnake] = d[timeCamel];
+
+    const remCamel = `loc${loc.charAt(0).toUpperCase() + loc.slice(1)}Remarks`;
+    const remSnake = `loc_${loc}_remarks`;
+    if (d[remCamel] && !d[remSnake]) res[remSnake] = d[remCamel];
+  });
+
+  return res;
+}
+
 // ─── Auto-fill initial form data from visit ──────────────────────────────────
 export function buildInitialData(visit, existingData) {
-  if (existingData) return { ...existingData };
+  if (existingData) return normalizeFormData(existingData);
 
   const locKey = hostelToLocKey(visit?.hostel?.name);
   const pre = {};
@@ -53,7 +91,8 @@ function esc(s) {
 }
 
 // ─── Anti-Ragging HTML Template ──────────────────────────────────────────────
-export function generateAntiRaggingHTML(visit, formData) {
+export function generateAntiRaggingHTML(visit, rawFormData) {
+  const formData = normalizeFormData(rawFormData);
   const d = visit?.checkIn ? new Date(visit.checkIn) : new Date();
   const timeStr = fmtTime(d);
   const locKey  = hostelToLocKey(visit?.hostel?.name);
@@ -159,7 +198,8 @@ export function generateAntiRaggingHTML(visit, formData) {
 }
 
 // ─── Mess Feedback HTML Template ─────────────────────────────────────────────
-export function generateMessFeedbackHTML(visit, formData) {
+export function generateMessFeedbackHTML(visit, rawFormData) {
+  const formData = normalizeFormData(rawFormData);
   const d = visit?.checkIn ? new Date(visit.checkIn) : new Date();
   const timeStr = fmtTime(d);
   const locKey  = hostelToLocKey(visit?.hostel?.name);

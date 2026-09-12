@@ -78,6 +78,8 @@ const scheduleService = {
   // Scheduled visits
   listScheduledVisits: (params) =>
     api.get('/schedule/visits', params),
+  getScheduleByHostel: (hostelId, params) =>
+    api.get(`/schedule/visits/by-hostel/${hostelId}`, params),
   getScheduledVisit: (id) =>
     api.get(`/schedule/visits/${id}`),
   getMySchedule: (params) =>

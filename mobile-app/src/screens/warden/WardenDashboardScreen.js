@@ -119,6 +119,28 @@ export default function WardenDashboardScreen() {
             </View>
           )}
 
+          {/* Quick Action: Hostel Visit Schedule */}
+          <TouchableOpacity
+            style={styles.scheduleActionBtn}
+            onPress={() => {
+              if (user?.assignedHostel?.id) {
+                navigation.navigate('HostelVisits', { hostelId: user.assignedHostel.id, hostelName: user.assignedHostel.name, hostelType: user.assignedHostel.type });
+              } else {
+                navigation.navigate('HostelList');
+              }
+            }}
+            activeOpacity={0.85}
+          >
+            <View style={styles.scheduleActionIcon}>
+              <Ionicons name="calendar-outline" size={24} color={theme.colors.roleWarden} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.scheduleActionTitle}>Hostel Visit Schedule</Text>
+              <Text style={styles.scheduleActionSubtitle}>View scheduled visits for your hostel</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
+          </TouchableOpacity>
+
           {/* Live Active Visits */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -245,4 +267,24 @@ const styles = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   metaText: { fontSize: 12, color: theme.colors.textMuted },
   remarks: { fontSize: 12, color: theme.colors.textSecondary, fontStyle: 'italic', marginTop: 8 },
+  scheduleActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.md,
+    padding: 14,
+    marginBottom: 16,
+    ...theme.shadow.sm,
+  },
+  scheduleActionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.roleWarden + '18',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  scheduleActionTitle: { fontSize: theme.fontSize.md, fontWeight: theme.fontWeight.bold, color: theme.colors.textPrimary },
+  scheduleActionSubtitle: { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, marginTop: 2 },
 });

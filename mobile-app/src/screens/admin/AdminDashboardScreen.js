@@ -88,10 +88,10 @@ export default function AdminDashboardScreen() {
             <SectionHeader title="Management" />
             <View style={styles.adminGrid}>
               {[
-                { icon: 'people', label: 'Users', color: theme.colors.roleFaculty, screen: 'Users' },
-                { icon: 'business', label: 'Hostels', color: theme.colors.roleWarden, screen: 'Hostels' },
-                { icon: 'bar-chart', label: 'Reports', color: theme.colors.warning, screen: 'Reports' },
-                { icon: 'list', label: 'All Visits', color: theme.colors.secondary, screen: 'AllVisits' },
+                { icon: 'people',    label: 'Users',         color: theme.colors.roleFaculty, screen: 'Users' },
+                { icon: 'business',  label: 'Hostels',       color: theme.colors.roleWarden,  screen: 'Hostels' },
+                { icon: 'bar-chart', label: 'Reports',       color: theme.colors.warning,     screen: 'Reports' },
+                { icon: 'list',      label: 'All Visits',    color: theme.colors.secondary,   screen: 'AllVisits' },
               ].map((item) => (
                 <TouchableOpacity
                   key={item.label}
@@ -106,6 +106,22 @@ export default function AdminDashboardScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* Faculty Panel — prominent banner */}
+            <TouchableOpacity
+              style={styles.facultyPanelBtn}
+              onPress={() => navigation.navigate('Users')}
+              activeOpacity={0.82}
+            >
+              <View style={styles.facultyPanelIcon}>
+                <Ionicons name="id-card" size={22} color={theme.colors.roleFaculty} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.facultyPanelLabel}>Faculty Panel</Text>
+                <Text style={styles.facultyPanelHint}>View, edit & manage Excel-imported faculty accounts</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
+            </TouchableOpacity>
           </View>
 
           {/* Schedule & Faculty Import — Phase 1 */}
@@ -134,7 +150,18 @@ export default function AdminDashboardScreen() {
               >
                 <Ionicons name="people-outline" size={20} color={theme.colors.roleFaculty} />
                 <Text style={[styles.importSecondaryLabel, { color: theme.colors.roleFaculty }]}>
-                  View Faculty Records
+                  Faculty Records
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.importSecondaryBtn}
+                onPress={() => navigation.navigate('HostelList')}
+                activeOpacity={0.82}
+              >
+                <Ionicons name="business-outline" size={20} color={theme.colors.roleWarden} />
+                <Text style={[styles.importSecondaryLabel, { color: theme.colors.roleWarden }]}>
+                  Hostel Dashboard
                 </Text>
               </TouchableOpacity>
 
@@ -145,7 +172,7 @@ export default function AdminDashboardScreen() {
               >
                 <Ionicons name="calendar-outline" size={20} color={theme.colors.secondary} />
                 <Text style={[styles.importSecondaryLabel, { color: theme.colors.secondary }]}>
-                  View Schedule / Records
+                  Visits Schedule
                 </Text>
               </TouchableOpacity>
             </View>
@@ -267,12 +294,28 @@ const styles = StyleSheet.create({
   importPrimaryText: { flex: 1 },
   importPrimaryLabel: { fontSize: theme.fontSize.md, fontWeight: theme.fontWeight.bold, color: '#fff' },
   importPrimaryHint:  { fontSize: theme.fontSize.xs, color: 'rgba(255,255,255,0.70)', marginTop: 2 },
-  importSecondaryRow: { flexDirection: 'row', gap: 10 },
+  importSecondaryRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   importSecondaryBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+    flex: 1, minWidth: 100, flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.borderRadius.lg,
-    padding: 14, ...theme.shadow.sm,
+    padding: 12, ...theme.shadow.sm,
   },
   importSecondaryLabel: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.semiBold, flex: 1 },
+  // Faculty Panel banner
+  facultyPanelBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    padding: 14, marginTop: 10,
+    borderWidth: 1.5, borderColor: theme.colors.roleFaculty + '30',
+    ...theme.shadow.sm,
+  },
+  facultyPanelIcon: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: theme.colors.roleFaculty + '15',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  facultyPanelLabel: { fontSize: theme.fontSize.md, fontWeight: theme.fontWeight.bold, color: theme.colors.textPrimary },
+  facultyPanelHint:  { fontSize: theme.fontSize.xs, color: theme.colors.textSecondary, marginTop: 2 },
 });

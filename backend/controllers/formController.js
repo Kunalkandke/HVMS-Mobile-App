@@ -40,17 +40,23 @@ exports.submitForm = async (req, res, next) => {
     if (!visit)
       return res.status(404).json({ success: false, message: 'Visit not found' });
 
-    // Only faculty who owns the visit can save
+    // Only faculty who owns the visit or admin can save
     if (req.user.role === 'faculty' && visit.faculty_id !== req.user.id)
       return res.status(403).json({ success: false, message: 'Access denied — not your visit' });
 
-    if (req.user.role !== 'faculty')
-      return res.status(403).json({ success: false, message: 'Only faculty can submit forms' });
+    if (!['faculty', 'admin'].includes(req.user.role))
+      return res.status(403).json({ success: false, message: 'Only faculty or admin can submit forms' });
 
     // Build updated form_submissions array
     const existing = Array.isArray(visit.form_submissions) ? visit.form_submissions : [];
-    const idx = existing.findIndex(f => f.form_type === formType);
-    const newEntry = { form_type: formType, submitted_at: new Date().toISOString(), data };
+    const idx = existing.findIndex(f => f.form_type === formType || f.formType === formType);
+    const newEntry = {
+      form_type: formType,
+      formType: formType,
+      submitted_at: new Date().toISOString(),
+      submittedAt: new Date().toISOString(),
+      data: data,
+    };
 
     let updated;
     if (idx >= 0) {

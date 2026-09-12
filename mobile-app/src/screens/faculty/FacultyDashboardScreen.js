@@ -39,9 +39,9 @@ export default function FacultyDashboardScreen() {
     else setLoading(true);
     try {
       const [myVisitsRes, dashRes, scheduleRes] = await Promise.all([
-        visitService.getMyVisits({ limit: 5 }),
+        visitService.getMyVisits({ limit: 10000 }),
         reportService.getDashboardStats(),
-        scheduleService.getMySchedule({ limit: 5 }).catch(() => ({ success: false })),
+        scheduleService.getMySchedule({ limit: 10000 }).catch(() => ({ success: false })),
       ]);
 
       if (myVisitsRes.success) {
@@ -59,12 +59,21 @@ export default function FacultyDashboardScreen() {
         }));
       }
       if (scheduleRes.success) {
-        // Show only upcoming + today visits (next 3)
+        // Show today + upcoming scheduled visits, AND any recently completed schedule entries
         const today = new Date().toISOString().slice(0, 10);
-        const upcoming = (scheduleRes.data.visits || [])
+        const all = scheduleRes.data.visits || [];
+        // upcoming / today (not yet done)
+        const upcomingOpen = all
           .filter(v => v.visitDate >= today && v.status === 'scheduled')
           .slice(0, 3);
-        setScheduledVisits(upcoming);
+        // today/recently completed scheduled entries (so they show as locked)
+        const recentDone = all
+          .filter(v => (v.status === 'completed' || v.status === 'started' || !!(v.actualVisitId || v.actual_visit_id))
+                    && v.visitDate >= today)
+          .slice(0, 2);
+        // Merge: completed first so faculty sees them locked, then upcoming
+        const merged = [...recentDone, ...upcomingOpen].slice(0, 5);
+        setScheduledVisits(merged);
       }
     } catch (err) {
       Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to load dashboard' });
@@ -140,12 +149,10 @@ export default function FacultyDashboardScreen() {
           <SectionHeader title="Quick Actions" />
           <View style={styles.actionsGrid}>
             <ActionButton
-              icon="play-circle"
-              label="Start Visit"
-              color={theme.colors.success}
-              onPress={() => navigation.navigate('StartVisit')}
-              disabled={!!activeVisit}
-              disabledHint={activeVisit ? 'End current visit first' : undefined}
+              icon="business"
+              label="Hostel Visits"
+              color={theme.colors.primary}
+              onPress={() => navigation.navigate('HostelList')}
             />
             <ActionButton
               icon="stop-circle"
@@ -158,13 +165,13 @@ export default function FacultyDashboardScreen() {
             <ActionButton
               icon="time"
               label="History"
-              color={theme.colors.primary}
+              color={theme.colors.secondary}
               onPress={() => navigation.navigate('Visits')}
             />
             <ActionButton
               icon="person"
               label="Profile"
-              color={theme.colors.secondary}
+              color={theme.colors.accent}
               onPress={() => navigation.navigate('Profile')}
             />
           </View>
@@ -186,20 +193,56 @@ export default function FacultyDashboardScreen() {
             scheduledVisits.map((sv, i) => {
               const today = new Date().toISOString().slice(0, 10);
               const isToday = sv.visitDate === today;
+              // A schedule entry is "done" if status completed/started OR actual visit already exists
+              const isCompleted = sv.status === 'completed' || sv.status === 'started'
+                || !!(sv.actualVisitId || sv.actual_visit_id);
+              // Can only start if: today, still scheduled, and NOT already done
+              const canStart = isToday && sv.status === 'scheduled' && !isCompleted;
               const roundColors = {
                 'Round-I':'#1565c0','Round-II':'#2e7d32','Round-III':'#e65100','Round-IV':'#6a1b9a',
               };
               const rc = roundColors[sv.round] || theme.colors.primary;
+
+              const handleCardTap = () => {
+                // Block re-starting completed visits
+                const alreadyDone = isCompleted
+                  || !!(sv.actualVisitId || sv.actual_visit_id);
+                if (alreadyDone) {
+                  const actualId = sv.actualVisitId || sv.actual_visit_id;
+                  if (actualId) {
+                    navigation.navigate('VisitDetail', { visitId: actualId });
+                  } else {
+                    navigation.navigate('Visits'); // fall back to history
+                  }
+                  return;
+                }
+                if (canStart) {
+                  navigation.navigate('StartVisit', {
+                    hostelId:        sv.hostel?.id || sv.hostel_id,
+                    hostelName:      sv.hostel?.name,
+                    hostelType:      sv.hostelType,
+                    scheduledVisitId: sv.id,  // link to schedule entry
+                  });
+                } else {
+                  navigation.navigate('FacultySchedule');
+                }
+              };
+
               return (
                 <TouchableOpacity
                   key={sv.id || i}
-                  style={[styles.scheduleCard, isToday && styles.scheduleCardToday]}
-                  onPress={() => navigation.navigate('FacultySchedule')}
+                  style={[styles.scheduleCard, canStart && styles.scheduleCardToday, isCompleted && styles.scheduleCardDone]}
+                  onPress={handleCardTap}
                   activeOpacity={0.82}
                 >
-                  {isToday && (
+                  {canStart && (
                     <View style={styles.todayTag}>
-                      <Text style={styles.todayTagTxt}>TODAY</Text>
+                      <Text style={styles.todayTagTxt}>🟢 TODAY'S VISIT — TAP TO START</Text>
+                    </View>
+                  )}
+                  {isCompleted && (
+                    <View style={[styles.todayTag, { backgroundColor: theme.colors.primary }]}>
+                      <Text style={styles.todayTagTxt}>✓ COMPLETED — TAP TO VIEW</Text>
                     </View>
                   )}
                   <View style={styles.scheduleCardRow}>
@@ -221,7 +264,7 @@ export default function FacultyDashboardScreen() {
                       </Text>
                       <Text style={styles.scheduleDow}>{sv.dayOfWeek || ''}</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={16} color={theme.colors.textMuted} />
+                    <Ionicons name={isCompleted ? 'checkmark-circle' : 'chevron-forward'} size={16} color={isCompleted ? theme.colors.primary : theme.colors.primary} />
                   </View>
                 </TouchableOpacity>
               );
@@ -376,6 +419,7 @@ const styles = StyleSheet.create({
     marginBottom: 8, overflow: 'hidden', ...theme.shadow.sm,
   },
   scheduleCardToday: { borderWidth: 1.5, borderColor: theme.colors.success + '60' },
+  scheduleCardDone:  { borderWidth: 1.5, borderColor: theme.colors.primary + '40', opacity: 0.90 },
   todayTag: { backgroundColor: theme.colors.success, paddingVertical: 3, paddingHorizontal: 12 },
   todayTagTxt: { fontSize: theme.fontSize.xs, fontWeight: theme.fontWeight.bold, color: '#fff', letterSpacing: 0.8 },
   scheduleCardRow: { flexDirection: 'row', alignItems: 'center', padding: 12 },

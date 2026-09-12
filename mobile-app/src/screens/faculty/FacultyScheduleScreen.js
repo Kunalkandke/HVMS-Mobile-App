@@ -47,20 +47,39 @@ function VisitCard({ item, onPress }) {
   const rc = ROUND_COLOR[item.round]   || theme.colors.primary;
 
   const today = new Date().toISOString().slice(0, 10);
-  const isToday   = item.visitDate === today;
-  const isPast    = item.visitDate <  today;
+  const isToday     = item.visitDate === today;
+  const isFuture    = item.visitDate >  today;
+  // A visit is "done" if it was completed/started OR if an actual visit record already exists for it
+  const isCompleted = item.status === 'completed' || item.status === 'started'
+    || !!(item.actualVisitId || item.actual_visit_id);
+  // Can only start if: today's date, still scheduled, and NOT already completed
+  const canStart    = isToday && item.status === 'scheduled' && !isCompleted;
 
   return (
     <TouchableOpacity
-      style={[s.card, isToday && s.cardToday]}
+      style={[s.card, isToday && !isCompleted && s.cardToday, isCompleted && s.cardDone]}
       onPress={() => onPress && onPress(item)}
       activeOpacity={0.82}
     >
-      {isToday && (
-        <View style={s.todayBanner}>
-          <Text style={s.todayBannerTxt}>TODAY</Text>
+      {/* Banners */}
+      {isCompleted && (
+        <View style={s.doneBanner}>
+          <Ionicons name="checkmark-circle" size={13} color="#fff" />
+          <Text style={s.doneBannerTxt}>✓ VISIT COMPLETED — TAP TO VIEW DETAILS</Text>
         </View>
       )}
+      {canStart && (
+        <View style={s.todayBanner}>
+          <Text style={s.todayBannerTxt}>🟢 TODAY'S VISIT — TAP TO START</Text>
+        </View>
+      )}
+      {isFuture && item.status === 'scheduled' && (
+        <View style={s.lockedBanner}>
+          <Ionicons name="lock-closed" size={11} color="#555" />
+          <Text style={s.lockedBannerTxt}>LOCKED UNTIL {item.visitDate}</Text>
+        </View>
+      )}
+
       <View style={s.cardTop}>
         {/* Date + day column */}
         <View style={s.dateCol}>
@@ -105,15 +124,25 @@ function VisitCard({ item, onPress }) {
           </View>
         </View>
 
-        {/* Chevron */}
-        <Ionicons name="chevron-forward" size={16} color={theme.colors.textMuted} />
+        {/* Chevron / Lock */}
+        {isFuture && !isCompleted ? (
+          <Ionicons name="lock-closed-outline" size={16} color={theme.colors.textMuted} />
+        ) : (
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.textMuted} />
+        )}
       </View>
 
-      {/* Action hint for today's scheduled visit */}
-      {isToday && item.status === 'scheduled' && (
+      {/* Action hint */}
+      {canStart && (
         <View style={s.actionHint}>
           <Ionicons name="play-circle-outline" size={14} color={theme.colors.success} />
-          <Text style={s.actionHintTxt}>Tap Start Visit to begin</Text>
+          <Text style={s.actionHintTxt}>Tap to Start Visit</Text>
+        </View>
+      )}
+      {isCompleted && (
+        <View style={s.actionHint}>
+          <Ionicons name="eye-outline" size={14} color={theme.colors.primary} />
+          <Text style={[s.actionHintTxt, { color: theme.colors.primary }]}>Tap to View Visit Details</Text>
         </View>
       )}
     </TouchableOpacity>
@@ -136,11 +165,12 @@ function SectionHeader({ title, count }) {
 export default function FacultyScheduleScreen() {
   const navigation = useNavigation();
 
-  const [visits,     setVisits]     = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [statusFilter, setFilter]  = useState('');
-  const [pagination, setPagination] = useState({ total: 0 });
+  const [visits,       setVisits]       = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [statusFilter, setFilter]      = useState('');
+  const [hostelFilter, setHostelFilter] = useState(''); // '', 'boys', 'girls'
+  const [pagination,   setPagination]   = useState({ total: 0 });
 
   useFocusEffect(
     useCallback(() => { loadVisits(); }, [statusFilter])
@@ -152,7 +182,7 @@ export default function FacultyScheduleScreen() {
     try {
       const res = await scheduleService.getMySchedule({
         status: statusFilter || undefined,
-        limit:  100,
+        limit:  10000,
       });
       if (res.success) {
         setVisits(res.data.visits || []);
@@ -166,11 +196,16 @@ export default function FacultyScheduleScreen() {
     }
   };
 
+  const filteredVisits = React.useMemo(() => {
+    if (!hostelFilter) return visits;
+    return visits.filter(v => v.hostelType === hostelFilter);
+  }, [visits, hostelFilter]);
+
   // Partition into today / upcoming / past
   const today    = new Date().toISOString().slice(0, 10);
-  const todayV   = visits.filter(v => v.visitDate === today);
-  const upcomingV= visits.filter(v => v.visitDate >  today);
-  const pastV    = visits.filter(v => v.visitDate <  today);
+  const todayV   = filteredVisits.filter(v => v.visitDate === today);
+  const upcomingV= filteredVisits.filter(v => v.visitDate >  today);
+  const pastV    = filteredVisits.filter(v => v.visitDate <  today);
 
   // Build flat list with section headers
   const sections = [];
@@ -188,12 +223,55 @@ export default function FacultyScheduleScreen() {
   }
 
   const handleVisitPress = (visit) => {
-    // If today's visit is scheduled, go to StartVisit
     const today2 = new Date().toISOString().slice(0, 10);
+
+    // ── COMPLETED: permanently locked — show details only ─────────────
+    // A visit is done if status is completed/started OR it already has an actual_visit_id
+    const alreadyDone = visit.status === 'completed' || visit.status === 'started'
+      || !!(visit.actualVisitId || visit.actual_visit_id);
+
+    if (alreadyDone) {
+      const actualId = visit.actualVisitId || visit.actual_visit_id;
+      if (actualId) {
+        navigation.navigate('VisitDetail', { visitId: actualId });
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: 'Visit Already Completed ✓',
+          text2: 'This visit has been completed and submitted. View Visit History for details.',
+        });
+      }
+      return;
+    }
+
+    // ── TODAY + scheduled (not yet done): allow start once ────────────
     if (visit.visitDate === today2 && visit.status === 'scheduled') {
-      navigation.navigate('StartVisit');
-    } else if (visit.actualVisitId) {
-      navigation.navigate('VisitDetail', { visitId: visit.actualVisitId });
+      navigation.navigate('StartVisit', {
+        hostelId:        visit.hostelId || visit.hostel?.id,
+        hostelName:      visit.hostel?.name,
+        hostelType:      visit.hostelType,
+        scheduledVisitId: visit.id,
+      });
+      return;
+    }
+
+    // ── FUTURE: locked until visit date ──────────────────────────────
+    if (visit.visitDate > today2) {
+      Toast.show({
+        type: 'info',
+        text1: 'Visit Locked 🔒',
+        text2: `Scheduled for ${visit.visitDate}. You can start on the visit date.`,
+      });
+      return;
+    }
+
+    // ── PAST + still scheduled (missed/pending) ───────────────────────
+    if (visit.visitDate < today2 && visit.status === 'scheduled') {
+      Toast.show({
+        type: 'info',
+        text1: 'Past Scheduled Visit 🗓',
+        text2: `This visit date has passed (${visit.visitDate}). Contact admin if it needs to be recorded.`,
+      });
     }
   };
 
@@ -201,10 +279,27 @@ export default function FacultyScheduleScreen() {
     <SafeAreaView style={s.container}>
       <AppHeader
         title="My Schedule"
-        subtitle={`${pagination.total || visits.length} assigned visits`}
+        subtitle={`${filteredVisits.length} assigned visits`}
         showBack
         backgroundColor={theme.colors.primary}
       />
+
+      {/* Hostel filter chips */}
+      <View style={s.hostelFilterBar}>
+        {[
+          { label: 'All Hostels', value: '' },
+          { label: '👧 Girls Hostel', value: 'girls' },
+          { label: '👦 Boys Hostel', value: 'boys' },
+        ].map(hf => (
+          <TouchableOpacity
+            key={hf.value}
+            style={[s.hChip, hostelFilter === hf.value && s.hChipActive]}
+            onPress={() => setHostelFilter(hf.value)}
+          >
+            <Text style={[s.hChipTxt, hostelFilter === hf.value && s.hChipTxtActive]}>{hf.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {/* Status filter chips */}
       <View style={s.filterBar}>
@@ -251,7 +346,12 @@ export default function FacultyScheduleScreen() {
 
 const s = StyleSheet.create({
   container:  { flex: 1, backgroundColor: theme.colors.background },
-  filterBar:  { flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 10, gap: 8, backgroundColor: theme.colors.surface, borderBottomWidth: 1, borderBottomColor: theme.colors.border },
+  hostelFilterBar: { flexDirection: 'row', paddingHorizontal: 14, paddingTop: 10, paddingBottom: 4, gap: 8, backgroundColor: theme.colors.surface },
+  hChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: theme.borderRadius.full, backgroundColor: theme.colors.surfaceVariant, borderWidth: 1, borderColor: theme.colors.border },
+  hChipActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
+  hChipTxt: { fontSize: theme.fontSize.xs, color: theme.colors.textSecondary, fontWeight: theme.fontWeight.medium },
+  hChipTxtActive: { color: '#fff', fontWeight: theme.fontWeight.bold },
+  filterBar:  { flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 8, gap: 8, backgroundColor: theme.colors.surface, borderBottomWidth: 1, borderBottomColor: theme.colors.border },
   chip:       { paddingHorizontal: 14, paddingVertical: 5, borderRadius: theme.borderRadius.full, backgroundColor: theme.colors.surfaceVariant, borderWidth: 1, borderColor: theme.colors.border },
   chipActive: { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary },
   chipTxt:    { fontSize: theme.fontSize.xs, color: theme.colors.textSecondary, fontWeight: theme.fontWeight.medium },
@@ -263,8 +363,13 @@ const s = StyleSheet.create({
   sectionCountTxt: { fontSize: theme.fontSize.xs, color: '#fff', fontWeight: theme.fontWeight.bold },
   card:       { backgroundColor: theme.colors.surface, borderRadius: theme.borderRadius.lg, marginBottom: 8, overflow: 'hidden', ...theme.shadow.sm },
   cardToday:  { borderWidth: 1.5, borderColor: theme.colors.success + '60' },
+  cardDone:   { borderWidth: 1.5, borderColor: theme.colors.primary + '40', opacity: 0.92 },
   todayBanner:{ backgroundColor: theme.colors.success, paddingVertical: 3, paddingHorizontal: 12 },
   todayBannerTxt: { fontSize: theme.fontSize.xs, fontWeight: theme.fontWeight.bold, color: '#fff', letterSpacing: 0.8 },
+  doneBanner: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: theme.colors.primary, paddingVertical: 3, paddingHorizontal: 12 },
+  doneBannerTxt: { fontSize: theme.fontSize.xs, fontWeight: theme.fontWeight.bold, color: '#fff', letterSpacing: 0.6 },
+  lockedBanner:{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#e0e0e0', paddingVertical: 3, paddingHorizontal: 12 },
+  lockedBannerTxt: { fontSize: 10, fontWeight: theme.fontWeight.bold, color: '#555', letterSpacing: 0.8 },
   cardTop:    { flexDirection: 'row', alignItems: 'center', padding: 12 },
   dateCol:    { width: 46, alignItems: 'center', marginRight: 12 },
   dateNum:    { fontSize: theme.fontSize.xxl, fontWeight: theme.fontWeight.bold, color: theme.colors.textPrimary, lineHeight: 28 },

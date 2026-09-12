@@ -62,7 +62,9 @@ function VisitCard({ item }) {
   const statusColor = STATUS_COLOR[item.status] || theme.colors.textMuted;
   const faculty = item.facultyUser || item.facultyProfile;
   const facultyName = faculty?.name || item.excelFacultyName || '—';
-  const hostelName  = item.hostel?.name || item.hostelType || '—';
+  const hostelName  = item.hostel?.name || (item.hostelType === 'girls' ? "Girls Hostel" : "Boys Hostel");
+  const hostelColor = item.hostelType === 'girls' ? theme.colors.accent : theme.colors.secondary;
+  const facCode     = faculty?.facultyCode || faculty?.faculty_code;
 
   return (
     <View style={s.card}>
@@ -71,9 +73,26 @@ function VisitCard({ item }) {
         <Text style={s.cardDay}>{item.dayOfWeek?.slice(0, 3) || ''}</Text>
       </View>
       <View style={s.cardBody}>
-        <Text style={s.cardTitle} numberOfLines={1}>{facultyName}</Text>
-        <Text style={s.cardSub} numberOfLines={1}>{hostelName} · {item.round}</Text>
-        {faculty?.phone && <Text style={s.cardPhone}>{faculty.phone}</Text>}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Text style={s.cardTitle} numberOfLines={1}>{facultyName}</Text>
+          {facCode && (
+            <View style={s.facTag}>
+              <Text style={s.facTagTxt}>{facCode}</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={s.cardSubRow}>
+          <View style={[s.hostelTypeBadge, { backgroundColor: hostelColor + '18', borderColor: hostelColor + '40' }]}>
+            <Ionicons name={item.hostelType === 'girls' ? 'female' : 'male'} size={11} color={hostelColor} />
+            <Text style={[s.hostelTypeBadgeTxt, { color: hostelColor }]}>
+              {item.hostelType === 'girls' ? 'Girls' : 'Boys'} Hostel
+            </Text>
+          </View>
+          <Text style={s.cardSub}>{hostelName} · {item.round}</Text>
+        </View>
+
+        {faculty?.phone && <Text style={s.cardPhone}>📱 {faculty.phone}</Text>}
       </View>
       <View style={[s.statusDot, { backgroundColor: statusColor }]} />
     </View>
@@ -170,7 +189,7 @@ export default function ScheduleManagementScreen() {
           hostelType: hostelFilter || undefined,
           status:     statusFilter || undefined,
           round:      roundFilter  || undefined,
-          page, limit: 25,
+          page, limit: 10000,
         });
         if (res.success) {
           setVisits(res.data.visits || []);
@@ -354,8 +373,13 @@ const s = StyleSheet.create({
   cardDay:   { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, textAlign: 'center' },
   cardBody:  { flex: 1 },
   cardTitle: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.semiBold, color: theme.colors.textPrimary },
-  cardSub:   { fontSize: theme.fontSize.xs, color: theme.colors.textSecondary, marginTop: 2 },
-  cardPhone: { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, marginTop: 1 },
+  facTag: { backgroundColor: theme.colors.primary, borderRadius: theme.borderRadius.full, paddingHorizontal: 6, paddingVertical: 1 },
+  facTagTxt: { fontSize: 9, fontWeight: '800', color: '#fff' },
+  cardSubRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' },
+  hostelTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: theme.borderRadius.full, borderWidth: 1 },
+  hostelTypeBadgeTxt: { fontSize: 10, fontWeight: theme.fontWeight.bold },
+  cardSub:   { fontSize: theme.fontSize.xs, color: theme.colors.textSecondary },
+  cardPhone: { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, marginTop: 2 },
   statusDot: { width: 10, height: 10, borderRadius: 5, marginLeft: 8 },
   // Upload card
   uploadCard:    { backgroundColor: theme.colors.surface, borderRadius: theme.borderRadius.lg, padding: 14, marginBottom: 10, ...theme.shadow.sm },

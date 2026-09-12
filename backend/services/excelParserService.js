@@ -137,6 +137,13 @@ function extractPhone(raw) {
   return fb.length >= 7 ? fb.slice(0, 15) : '';
 }
 
+function normalisePhone(p) {
+  if (!p) return '';
+  const digits = String(p).replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
+}
+
 /**
  * Normalise a faculty name for deduplication.
  * Strips titles (Dr, Mr, Ms, Mrs, Prof, Ar), dots, extra spaces.
@@ -382,20 +389,34 @@ function buildPreview(parseResult, existingUsers, hostels, existingProfiles) {
   }
 
   // ── Faculty cross-reference ────────────────────────────────────────────────
-  const userByKey    = new Map(existingUsers.map(u => [normaliseName(u.name), u]));
-  const profileByKey = new Map((existingProfiles || []).map(p => [p.name_key, p]));
+  const userByPhone  = new Map();
+  const userByKey    = new Map();
+  for (const u of (existingUsers || [])) {
+    const ph = normalisePhone(u.phone);
+    if (ph.length >= 7) userByPhone.set(ph, u);
+    userByKey.set(normaliseName(u.name), u);
+  }
+
+  const profileByPhone = new Map();
+  const profileByKey   = new Map();
+  for (const p of (existingProfiles || [])) {
+    const ph = normalisePhone(p.phone);
+    if (ph.length >= 7) profileByPhone.set(ph, p);
+    profileByKey.set(p.name_key, p);
+  }
 
   const facultyPreview = facultyList.map(f => {
-    const eu = userByKey.get(f.nameKey)    || null;
-    const ep = profileByKey.get(f.nameKey) || null;
+    const normPh = normalisePhone(f.phone);
+    const eu = (normPh.length >= 7 ? userByPhone.get(normPh) : null) || userByKey.get(f.nameKey) || null;
+    const ep = (normPh.length >= 7 ? profileByPhone.get(normPh) : null) || profileByKey.get(f.nameKey) || null;
 
     let status = 'new', matchedId = null, matchType = null;
     let phoneConflict = false, phoneConflictDetails = null;
 
     if (eu) {
       status = 'existing_user'; matchedId = eu.id; matchType = 'user';
-      const ep2 = (eu.phone || '').replace(/\D/g, '');
-      const np  = (f.phone  || '').replace(/\D/g, '');
+      const ep2 = normalisePhone(eu.phone);
+      const np  = normalisePhone(f.phone);
       if (ep2 && np && ep2 !== np) {
         phoneConflict = true;
         phoneConflictDetails = `Excel: ${f.phone} | HVMS: ${eu.phone}`;
@@ -405,8 +426,8 @@ function buildPreview(parseResult, existingUsers, hostels, existingProfiles) {
         status = 'existing_user'; matchedId = ep.resolved_user_id; matchType = 'user_via_profile';
       } else {
         status = 'existing_profile'; matchedId = ep.id; matchType = 'profile';
-        const ep2 = (ep.phone || '').replace(/\D/g, '');
-        const np  = (f.phone  || '').replace(/\D/g, '');
+        const ep2 = normalisePhone(ep.phone);
+        const np  = normalisePhone(f.phone);
         if (ep2 && np && ep2 !== np) {
           phoneConflict = true;
           phoneConflictDetails = `Excel: ${f.phone} | Profile: ${ep.phone}`;
@@ -490,4 +511,4 @@ function buildPreview(parseResult, existingUsers, hostels, existingProfiles) {
   };
 }
 
-module.exports = { parseScheduleExcel, buildPreview, normaliseName, extractPhone };
+module.exports = { parseScheduleExcel, buildPreview, normaliseName, extractPhone, normalisePhone };

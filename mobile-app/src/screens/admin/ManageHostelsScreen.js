@@ -126,6 +126,13 @@ export default function ManageHostelsScreen() {
         <View style={styles.actions}>
           <TouchableOpacity
             style={styles.actionBtn}
+            onPress={() => navigation.navigate('HostelVisits', { hostelId: item.id || item._id, hostelName: item.name, hostelType: item.type })}
+          >
+            <Ionicons name="calendar-outline" size={15} color={theme.colors.secondary} />
+            <Text style={[styles.actionText, { color: theme.colors.secondary }]}>Schedule</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionBtn}
             onPress={() => navigation.navigate('CreateHostel', { hostel: item, editMode: true })}
           >
             <Ionicons name="create-outline" size={15} color={theme.colors.primary} />

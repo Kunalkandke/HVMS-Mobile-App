@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import Toast from 'react-native-toast-message';
 import { formService } from '../../services/formService';
 import { useAuth } from '../../context/AuthContext';
@@ -44,9 +44,11 @@ export default function FormSelectionScreen() {
   const [submittedForms, setSubmittedForms] = useState([]);
   const readOnly = passedReadOnly || (user?.role !== 'faculty');
 
-  useEffect(() => {
-    loadForms();
-  }, []);
+  useFocusEffect(
+    React.useCallback(() => {
+      loadForms();
+    }, [visitId])
+  );
 
   const loadForms = async () => {
     try {

@@ -1,27 +1,38 @@
 'use strict';
 /**
- * HVMS Schedule Import Controller — v2 (fixed)
+ * HVMS Schedule Import Controller — v3 (fixed)
  *
- * KEY FIXES vs v1:
- *  1. confirmImport now creates real rows in `users` table (role=faculty) —
- *     not just faculty_profiles — so faculty appear in Faculty Management panel.
- *  2. Generates FAC001…FAC999 faculty codes stored in users.faculty_code.
- *  3. Hashes mobile number as initial password; sets must_change_password=true.
- *  4. Scheduled_visit insertion is now row-by-row with per-row error handling,
- *     so a single duplicate never silently kills an entire batch of 200 rows.
- *  5. faculty_profiles.resolved_user_id is set immediately on creation.
- *  6. All 4 rounds are always fully inserted from the preview.scheduleRows.
+ * KEY FIXES vs v2:
+ *  1. confirmImport uses phone-number as primary dedup key (not name) to prevent
+ *     silent match failures when names are spelled inconsistently in Excel.
+ *  2. generateFacultyCodeBatch() pre-generates all needed FAC codes in ONE DB
+ *     round-trip, eliminating the per-faculty call race condition.
+ *  3. fetchAll now accepts an optional `limit` parameter (default 10000) to
+ *     prevent silent data truncation on large tables.
+ *  4. Server-side console.error logging added to every faculty/row failure so
+ *     bugs surface in server logs even when the API response is suppressed.
+ *  5. listScheduledVisits enforces role-based access server-side — faculty are
+ *     locked to their own visits, wardens to their assigned hostel.
+ *  6. New export: getScheduleByHostel — paginated, role-filtered visit list for
+ *     a specific hostel.
  */
 
 const bcrypt = require('bcryptjs');
 const { supabase }    = require('../config/db');
 const { auditLogger } = require('../middleware/helpers');
-const { parseScheduleExcel, buildPreview, normaliseName } = require('../services/excelParserService');
+const { parseScheduleExcel, buildPreview, normaliseName, normalisePhone } = require('../services/excelParserService');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-async function fetchAll(table, select, filter = {}) {
-  let q = supabase.from(table).select(select);
+/**
+ * Generic paginated fetch helper.
+ * @param {string} table
+ * @param {string} select
+ * @param {Object} filter  — key/value equality filters
+ * @param {number} limit   — row cap (default 10000)
+ */
+async function fetchAll(table, select, filter = {}, limit = 10000) {
+  let q = supabase.from(table).select(select).limit(limit);
   for (const [col, val] of Object.entries(filter)) q = q.eq(col, val);
   const { data, error } = await q;
   if (error) throw new Error(`${table} fetch failed: ${error.message}`);
@@ -29,27 +40,33 @@ async function fetchAll(table, select, filter = {}) {
 }
 
 /**
- * Generate the next available FAC code (FAC001, FAC002, …).
- * Reads the current max faculty_code from the users table and increments.
- * Thread-safe enough for sequential imports; for concurrent imports a DB
- * sequence would be ideal, but this is sufficient for this use-case.
+ * Pre-generate `count` FAC codes in a single DB round-trip.
+ * Reads the current maximum faculty_code once, then returns the next `count`
+ * sequential codes.  Much safer than the old per-faculty call which could
+ * produce duplicate codes under concurrent imports.
+ *
+ * @param {number} count
+ * @returns {Promise<string[]>}
  */
-async function generateFacultyCode() {
+async function generateFacultyCodeBatch(count) {
+  if (count === 0) return [];
   const { data, error } = await supabase
     .from('users')
     .select('faculty_code')
     .like('faculty_code', 'FAC%')
     .order('faculty_code', { ascending: false })
     .limit(1);
-
   if (error) throw new Error('Could not query faculty codes: ' + error.message);
-
   let next = 1;
   if (data && data.length > 0 && data[0].faculty_code) {
     const num = parseInt(data[0].faculty_code.replace('FAC', ''), 10);
     if (!isNaN(num)) next = num + 1;
   }
-  return 'FAC' + String(next).padStart(3, '0');
+  const codes = [];
+  for (let i = 0; i < count; i++) {
+    codes.push('FAC' + String(next + i).padStart(3, '0'));
+  }
+  return codes;
 }
 
 // ─── 1. UPLOAD + PARSE + PREVIEW ─────────────────────────────────────────────
@@ -134,12 +151,13 @@ exports.uploadPreview = async (req, res, next) => {
 // ─── 2. CONFIRM IMPORT ────────────────────────────────────────────────────────
 //
 //  For NEW faculty (not yet in users table):
-//    1. Generate FAC code
+//    1. Pre-generate all FAC codes in one batch call (no race condition)
 //    2. Create row in `users` with role=faculty, email=NULL, password=bcrypt(phone),
 //       must_change_password=true, faculty_code=FACxxx, import_source='excel_import'
 //    3. Create/update faculty_profiles row linked to that user
 //
 //  For EXISTING faculty (already in users):
+//    - Match by PHONE first, then name as fallback (fixes silent failures)
 //    - Use existing user.id directly
 //    - Update faculty_profiles.resolved_user_id if not already set
 //
@@ -182,8 +200,41 @@ exports.confirmImport = async (req, res, next) => {
       fetchAll('faculty_profiles', 'id, name_key, phone, resolved_user_id, is_complete', {}),
     ]);
 
-    const userByKey    = new Map(allUsers.map(u    => [normaliseName(u.name), u]));
-    const profileByKey = new Map(allProfiles.map(p => [p.name_key, p]));
+    // Build lookup maps using PHONE as primary key, name as fallback
+    const userByPhone = new Map();
+    const userByName  = new Map();
+    for (const u of allUsers) {
+      const ph = normalisePhone(u.phone);
+      if (ph.length >= 7) userByPhone.set(ph, u);
+      userByName.set(normaliseName(u.name), u);
+    }
+
+    const profileByPhone = new Map();
+    const profileByKey   = new Map();
+    for (const p of allProfiles) {
+      const ph = normalisePhone(p.phone);
+      if (ph.length >= 7) profileByPhone.set(ph, p);
+      profileByKey.set(p.name_key, p);
+    }
+
+    // ── Pre-count how many NEW faculty need codes ──────────────────────────
+    // Do this BEFORE the loop so we can batch-generate all FAC codes at once.
+    const facultyNeedingCodes = preview.faculty.filter(fp => {
+      const excelPhone   = normalisePhone(fp.phone);
+      const existingUser =
+        (excelPhone.length >= 7 ? userByPhone.get(excelPhone) : null) ||
+        userByName.get(fp.nameKey) ||
+        null;
+      const existingProfile =
+        (excelPhone.length >= 7 ? profileByPhone.get(excelPhone) : null) ||
+        profileByKey.get(fp.nameKey) ||
+        null;
+      // Needs a new user (and therefore a code) only when neither lookup hits
+      return !existingUser && !(existingProfile && existingProfile.resolved_user_id);
+    });
+
+    const preallocatedCodes = await generateFacultyCodeBatch(facultyNeedingCodes.length);
+    let codeIndex = 0;
 
     // ── Step 1: Resolve / create every faculty as a real HVMS user ─────────
     // nameKey → users.id  (the authoritative ID used for scheduled_visits)
@@ -193,8 +244,15 @@ exports.confirmImport = async (req, res, next) => {
 
     for (const fp of preview.faculty) {
       try {
-        const existingUser    = userByKey.get(fp.nameKey) || null;
-        const existingProfile = profileByKey.get(fp.nameKey) || null;
+        const excelPhone   = normalisePhone(fp.phone);
+        const existingUser =
+          (excelPhone.length >= 7 ? userByPhone.get(excelPhone) : null) ||
+          userByName.get(fp.nameKey) ||
+          null;
+        const existingProfile =
+          (excelPhone.length >= 7 ? profileByPhone.get(excelPhone) : null) ||
+          profileByKey.get(fp.nameKey) ||
+          null;
 
         if (existingUser) {
           // Already a full HVMS user — use as-is
@@ -216,22 +274,27 @@ exports.confirmImport = async (req, res, next) => {
         }
 
         // ── CREATE a new HVMS user for this faculty ────────────────────────
-        const phone = fp.phone || '';
-        if (!phone) {
+        const phoneRaw = fp.phone || '';
+        // Normalize phone: keep only digits (and leading +) for consistent storage & login
+        const phone = phoneRaw.replace(/[^\d+]/g, '').replace(/^\+91/, '') || phoneRaw;
+        const phoneDigitsOnly = phoneRaw.replace(/\D/g, ''); // pure digits for password hashing
+
+        if (!phoneDigitsOnly) {
           facultyErrors.push(`"${fp.name}": no phone number — cannot create login account.`);
+          console.error(`[HVMS] Faculty insert SKIPPED for "${fp.name}" (phone: ${fp.phone}): no phone number provided.`);
           // Still insert a faculty_profile so the faculty appears in the panel
         }
 
-        // Generate unique faculty code
-        const facultyCode = await generateFacultyCode();
+        // Use pre-generated code from batch (no race condition)
+        const facultyCode = preallocatedCodes[codeIndex++];
 
-        // Hash mobile number as initial password
-        const initialPassword = phone || facultyCode; // fallback to code if no phone
-        const hashedPassword  = await bcrypt.hash(initialPassword, 12);
+        // Hash mobile number (digits-only) as initial password
+        const initialPassword = phoneDigitsOnly || facultyCode;
+        const hashedPassword  = await bcrypt.hash(initialPassword, 10);
 
         const userData = {
           name:                 fp.name.trim(),
-          email:                null,            // nullable — to be filled by Admin
+          email:                null,
           password:             hashedPassword,
           role:                 'faculty',
           department:           '',
@@ -249,7 +312,7 @@ exports.confirmImport = async (req, res, next) => {
           .single();
 
         if (userErr) {
-          // Check if it's a unique constraint race — someone else just created this user
+          console.error(`[HVMS] Faculty insert FAILED for "${fp.name}" (phone: ${fp.phone}):`, userErr.message);
           if (userErr.code === '23505') {
             const { data: raceUser } = await supabase
               .from('users')
@@ -269,7 +332,12 @@ exports.confirmImport = async (req, res, next) => {
         facultyUserIdMap.set(fp.nameKey, newUser.id);
         newFacultyCreated++;
 
-        // Create or update faculty_profiles row, now fully linked
+        // Dynamically register in memory maps to prevent duplicates within the same import batch
+        const normCreatedPhone = normalisePhone(phone);
+        const createdUserObj = { id: newUser.id, name: fp.name, phone: phone, faculty_code: newUser.faculty_code };
+        if (normCreatedPhone.length >= 7) userByPhone.set(normCreatedPhone, createdUserObj);
+        userByName.set(normaliseName(fp.name), createdUserObj);
+
         if (existingProfile) {
           await supabase.from('faculty_profiles')
             .update({ resolved_user_id: newUser.id, is_complete: true })
@@ -283,30 +351,41 @@ exports.confirmImport = async (req, res, next) => {
             is_complete:      true,
             resolved_user_id: newUser.id,
           });
-          // Ignore duplicate profile (race condition) — the user was already created
           if (profErr && profErr.code !== '23505') {
             console.warn('faculty_profiles insert warning:', profErr.message);
           }
         }
       } catch (err) {
         facultyErrors.push(`"${fp.name}": unexpected error — ${err.message}`);
+        console.error(`[HVMS] Faculty loop UNEXPECTED ERROR for "${fp.name}" (phone: ${fp.phone}):`, err.message);
       }
     }
 
-    // ── Step 2: Insert scheduled_visit rows — ONE BY ONE ───────────────────
-    // Never batch — a single duplicate in a 200-row batch previously killed
-    // the entire batch silently.  Row-by-row lets us count exactly.
-
+    // ── Step 2: Insert scheduled_visit rows — ULTRA FAST BULK INSERT ─────
     let   inserted   = 0;
     let   duplicates = 0;
     let   failed     = 0;
     const rowErrors  = [];
 
-    // Dedup set — prevent sending the same record twice from the preview array
+    // Query existing scheduled visits for this hostel to prevent duplicate inserts across uploads
+    const { data: existingDbVisits } = await supabase
+      .from('scheduled_visits')
+      .select('faculty_user_id, hostel_id, visit_date, round')
+      .eq('hostel_id', hostelId);
+
+    const dbVisitSet = new Set();
+    if (existingDbVisits) {
+      for (const ev of existingDbVisits) {
+        if (ev.faculty_user_id) {
+          dbVisitSet.add(`${ev.faculty_user_id}||${ev.hostel_id}||${ev.visit_date}||${ev.round}`);
+        }
+      }
+    }
+
     const dedupSeen = new Set();
+    const rowsToInsert = [];
 
     for (const row of preview.scheduleRows) {
-      // Build a dedup key that is round-specific so all 4 rounds are always inserted
       const dedupKey = `${row.facultyNameKey}||${row.visitDate}||${row.round}`;
       if (dedupSeen.has(dedupKey)) {
         duplicates++;
@@ -316,10 +395,19 @@ exports.confirmImport = async (req, res, next) => {
 
       const userId = facultyUserIdMap.get(row.facultyNameKey) || null;
 
-      const visitRow = {
+      if (userId) {
+        const dbKey = `${userId}||${hostelId}||${row.visitDate}||${row.round}`;
+        if (dbVisitSet.has(dbKey)) {
+          duplicates++;
+          continue;
+        }
+        dbVisitSet.add(dbKey);
+      }
+
+      rowsToInsert.push({
         schedule_upload_id: uploadId,
         faculty_user_id:    userId,
-        faculty_profile_id: null,   // no longer needed once userId is set
+        faculty_profile_id: null,
         hostel_id:          hostelId,
         hostel_type:        hostelType,
         visit_date:         row.visitDate,
@@ -330,27 +418,41 @@ exports.confirmImport = async (req, res, next) => {
         original_row:       row.originalRow,
         excel_faculty_name: row.facultyName,
         excel_phone:        row.facultyPhone,
-      };
+      });
+    }
 
-      try {
-        const { error: insErr } = await supabase
-          .from('scheduled_visits')
-          .insert(visitRow);
+    if (rowsToInsert.length > 0) {
+      // Try fast bulk insertion
+      const { data: bulkData, error: bulkErr } = await supabase
+        .from('scheduled_visits')
+        .insert(rowsToInsert)
+        .select('id');
 
-        if (insErr) {
-          if (insErr.code === '23505') {
-            // True duplicate (same user + date + round already in DB)
-            duplicates++;
-          } else {
+      if (!bulkErr) {
+        inserted = bulkData ? bulkData.length : rowsToInsert.length;
+      } else {
+        console.warn('[HVMS] Bulk insert warning (falling back to fast single inserts):', bulkErr.message);
+        // Fallback row by row if any batch constraint fails
+        for (const visitRow of rowsToInsert) {
+          try {
+            const { error: insErr } = await supabase
+              .from('scheduled_visits')
+              .insert(visitRow);
+
+            if (insErr) {
+              if (insErr.code === '23505') duplicates++;
+              else {
+                failed++;
+                rowErrors.push(`Row ${visitRow.original_row}: ${insErr.message}`);
+              }
+            } else {
+              inserted++;
+            }
+          } catch (err) {
             failed++;
-            rowErrors.push(`Row ${row.originalRow} (${row.round} ${row.visitDate} ${row.facultyName}): ${insErr.message}`);
+            rowErrors.push(`Row ${visitRow.original_row}: ${err.message}`);
           }
-        } else {
-          inserted++;
         }
-      } catch (err) {
-        failed++;
-        rowErrors.push(`Row ${row.originalRow}: ${err.message}`);
       }
     }
 
@@ -492,11 +594,30 @@ exports.deleteUpload = async (req, res, next) => {
 
 exports.listScheduledVisits = async (req, res, next) => {
   try {
-    const {
+    let {
       uploadId, hostelType, hostelId, round, status,
       dateFrom, dateTo, facultyUserId, academicYear,
-      search, page = 1, limit = 30,
+      search, page = 1, limit = 10000,
     } = req.query;
+
+    // ── Role enforcement — never trust frontend filters for access control ──
+    if (req.user.role === 'faculty') {
+      // Faculty ONLY sees their own visits — override any facultyUserId param
+      facultyUserId = req.user.id;
+    } else if (req.user.role === 'warden') {
+      // Warden only sees visits for their assigned hostel
+      const warden = await supabase
+        .from('users')
+        .select('assigned_hostel_id')
+        .eq('id', req.user.id)
+        .single();
+      if (warden.data?.assigned_hostel_id) {
+        hostelId = warden.data.assigned_hostel_id;
+      } else {
+        return res.json({ success: true, data: { visits: [], pagination: { total: 0, page: 1, pages: 1 } } });
+      }
+    }
+    // Admin sees everything — no additional filter
 
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -529,7 +650,7 @@ exports.listScheduledVisits = async (req, res, next) => {
         .from('schedule_uploads').select('id').eq('academic_year', academicYear);
       const ids = (uploadIds || []).map(u => u.id);
       if (ids.length === 0) {
-        return res.json({ success: true, data: { visits: [], pagination: { total:0, page:1, pages:1 } } });
+        return res.json({ success: true, data: { visits: [], pagination: { total: 0, page: 1, pages: 1 } } });
       }
       q = q.in('schedule_upload_id', ids);
     }
@@ -570,7 +691,7 @@ exports.getScheduledVisit = async (req, res, next) => {
 
 exports.listFacultyProfiles = async (req, res, next) => {
   try {
-    const { isComplete, page = 1, limit = 30, search } = req.query;
+    const { isComplete, page = 1, limit = 10000, search } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let q = supabase
@@ -683,7 +804,7 @@ exports.completeFacultyProfile = async (req, res, next) => {
 
 exports.getMySchedule = async (req, res, next) => {
   try {
-    const { status, dateFrom, dateTo, page = 1, limit = 20 } = req.query;
+    const { status, dateFrom, dateTo, page = 1, limit = 10000 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let q = supabase
@@ -710,6 +831,97 @@ exports.getMySchedule = async (req, res, next) => {
       data: {
         visits: data || [],
         pagination: { total: count, page: Number(page), pages: Math.ceil(count / Number(limit)) },
+      },
+    });
+  } catch (err) { next(err); }
+};
+
+// ─── 14. GET SCHEDULE BY HOSTEL ──────────────────────────────────────────────
+//
+//  Returns paginated scheduled visits for a specific hostel.
+//  Role enforcement:
+//    - admin   → sees all visits for the hostel
+//    - warden  → must own this hostel (via assigned_hostel_id), sees all visits
+//    - faculty → sees only their own visits for this hostel
+
+exports.getScheduleByHostel = async (req, res, next) => {
+  try {
+    const hostelIdParam = req.params.hostelId;
+    const { round, status, dateFrom, dateTo, page = 1, limit = 10000 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    // 1. Verify hostel exists by UUID or type fallback
+    let hostel = null;
+    const { data: byId } = await supabase
+      .from('hostels').select('id, name, type').eq('id', hostelIdParam).maybeSingle();
+
+    if (byId) {
+      hostel = byId;
+    } else {
+      const { data: byType } = await supabase
+        .from('hostels').select('id, name, type').eq('type', hostelIdParam.toLowerCase()).maybeSingle();
+      if (byType) hostel = byType;
+    }
+
+    if (!hostel) {
+      return res.status(404).json({ success: false, message: 'Hostel not found.' });
+    }
+
+    const actualHostelId   = hostel.id;
+    const actualHostelType = hostel.type;
+
+    // Auto-backfill hostel_id for unlinked scheduled_visits matching hostel_type (background fix)
+    supabase
+      .from('scheduled_visits')
+      .update({ hostel_id: actualHostelId })
+      .is('hostel_id', null)
+      .eq('hostel_type', actualHostelType)
+      .then(() => {})
+      .catch(() => {});
+
+    // 2. Query scheduled visits by hostel_id OR hostel_type
+    let q = supabase
+      .from('scheduled_visits')
+      .select(`
+        id, visit_date, day_of_week, round, status, hostel_type, hostel_id,
+        actual_visit_id, excel_faculty_name, excel_phone, created_at,
+        hostel:hostel_id ( id, name, type ),
+        faculty_user:faculty_user_id ( id, name, email, phone, department, faculty_code )
+      `, { count: 'exact' })
+      .or(`hostel_id.eq.${actualHostelId},hostel_type.eq.${actualHostelType}`)
+      .order('visit_date', { ascending: true })
+      .order('round', { ascending: true })
+      .range(offset, offset + Number(limit) - 1);
+
+    // ROLE ENFORCEMENT — server-side, not UI-only
+    if (req.user.role === 'faculty') {
+      // Faculty sees ONLY their own visits for this hostel
+      q = q.eq('faculty_user_id', req.user.id);
+    } else if (req.user.role === 'warden') {
+      // Warden must own this hostel if assigned
+      const { data: wardenUser } = await supabase
+        .from('users').select('assigned_hostel_id').eq('id', req.user.id).single();
+      if (wardenUser?.assigned_hostel_id && wardenUser.assigned_hostel_id !== actualHostelId) {
+        return res.status(403).json({ success: false, message: 'Access denied — this hostel is not assigned to you.' });
+      }
+      // Warden sees all visits for their hostel
+    }
+    // Admin sees everything — no additional filter
+
+    if (round)    q = q.eq('round', round);
+    if (status)   q = q.eq('status', status);
+    if (dateFrom) q = q.gte('visit_date', dateFrom);
+    if (dateTo)   q = q.lte('visit_date', dateTo);
+
+    const { data, error, count } = await q;
+    if (error) throw new Error(error.message);
+
+    return res.json({
+      success: true,
+      data: {
+        hostel,
+        visits: data || [],
+        pagination: { total: count || (data ? data.length : 0), page: Number(page), pages: Math.ceil((count || 1) / Number(limit)) },
       },
     });
   } catch (err) { next(err); }

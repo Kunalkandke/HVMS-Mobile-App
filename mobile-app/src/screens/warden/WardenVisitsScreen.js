@@ -40,7 +40,7 @@ export default function WardenVisitsScreen() {
       // Backend automatically filters by warden's assigned hostel
       const [activeRes, completedRes] = await Promise.all([
         visitService.getActiveVisits(), // Gets active visits for warden's hostel
-        visitService.getHostelVisits({ status: 'completed', limit: 50 }), // Gets completed visits
+        visitService.getHostelVisits({ status: 'completed', limit: 10000 }), // Gets completed visits
       ]);
 
       let combined = [];

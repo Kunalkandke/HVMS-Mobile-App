@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, KeyboardAvoidingView,
-  Platform, TouchableOpacity, Image, Animated,
+  Platform, TouchableOpacity,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,8 +24,7 @@ export default function LoginScreen() {
 
   const validate = () => {
     const errs = {};
-    if (!email.trim()) errs.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(email)) errs.email = 'Enter a valid email';
+    if (!email.trim()) errs.email = 'Login ID / Faculty ID / Email is required';
     if (!password) errs.password = 'Password is required';
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -35,17 +34,16 @@ export default function LoginScreen() {
     if (!validate()) return;
     setLoading(true);
     try {
-      const result = await login(email.trim().toLowerCase(), password);
+      const result = await login(email.trim(), password);
       if (result.success) {
         if (result.user?.mustChangePassword) {
           navigation.navigate('ChangePassword', { forced: true });
         }
-        // AuthContext → RootNavigator will auto-navigate to Main
       } else {
         Toast.show({ type: 'error', text1: 'Login Failed', text2: result.message });
       }
     } catch (err) {
-      Toast.show({ type: 'error', text1: 'Error', text2: 'Something went wrong' });
+      Toast.show({ type: 'error', text1: 'Error', text2: err.message || 'Something went wrong' });
     } finally {
       setLoading(false);
     }
@@ -53,7 +51,7 @@ export default function LoginScreen() {
 
   return (
     <LinearGradient
-      colors={[theme.colors.primary, theme.colors.primaryLight, theme.colors.secondary]}
+      colors={[theme.colors.primary, '#1a237e', theme.colors.secondary]}
       style={styles.gradient}
       start={{ x: 0.1, y: 0 }}
       end={{ x: 0.9, y: 1 }}
@@ -63,47 +61,63 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
-          contentContainerStyle={[styles.scroll, { paddingTop: 32 }]}
+          contentContainerStyle={[styles.scroll, { paddingTop: 40, paddingBottom: 40 }]}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Logo / Brand */}
+          {/* Logo / Brand Header */}
           <View style={styles.brand}>
             <View style={styles.logoCircle}>
-              <Ionicons name="business" size={36} color={theme.colors.primary} />
+              <Ionicons name="business" size={40} color={theme.colors.primary} />
             </View>
             <Text style={styles.appName}>HVMS</Text>
             <Text style={styles.appTagline}>Hostel Visit Management System</Text>
             <Text style={styles.appCollege}>Engineering College Portal</Text>
           </View>
 
-          {/* Login Card */}
+          {/* Main Login Card */}
           <View style={[styles.card, { marginBottom: 24 }]}>
             <Text style={styles.cardTitle}>Welcome Back</Text>
-            <Text style={styles.cardSubtitle}>Sign in to your account</Text>
+            <Text style={styles.cardSubtitle}>Sign in to access your dashboard</Text>
 
+            {/* Login Identifier Field */}
             <InputField
-              label="Email Address"
+              label="Login ID / Faculty Code / Email"
               value={email}
               onChangeText={(v) => { setEmail(v); setErrors((e) => ({ ...e, email: undefined })); }}
-              placeholder="your@email.com"
-              keyboardType="email-address"
-              icon="mail-outline"
+              placeholder="e.g. FAC001, 9876543210, or email"
+              icon="person-outline"
               error={errors.email}
               required
               autoCapitalize="none"
             />
 
+            {/* Password Field */}
             <InputField
               label="Password"
               value={password}
               onChangeText={(v) => { setPassword(v); setErrors((e) => ({ ...e, password: undefined })); }}
-              placeholder="Enter your password"
+              placeholder="Enter password or mobile no."
               secureTextEntry
               icon="lock-closed-outline"
               error={errors.password}
               required
             />
 
+            {/* Faculty Login Guidance Banner */}
+            <View style={styles.facultyHintBox}>
+              <Ionicons name="information-circle" size={20} color={theme.colors.primary} style={{ marginTop: 2 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.facultyHintTitle}>Faculty Sign In Instructions</Text>
+                <Text style={styles.facultyHintTxt}>
+                  • <Text style={{ fontWeight: '700' }}>Login ID</Text>: Your Faculty ID (e.g. <Text style={{ fontWeight: '700', color: theme.colors.primary }}>FAC001</Text>) or 10-digit mobile number.
+                </Text>
+                <Text style={styles.facultyHintTxt}>
+                  • <Text style={{ fontWeight: '700' }}>Initial Password</Text>: Your 10-digit mobile number.
+                </Text>
+              </View>
+            </View>
+
+            {/* Login Button */}
             <Button
               title="Sign In"
               onPress={handleLogin}
@@ -116,7 +130,7 @@ export default function LoginScreen() {
 
             {/* Role Info */}
             <View style={styles.roleInfo}>
-              <Text style={styles.roleInfoTitle}>Supported Roles</Text>
+              <Text style={styles.roleInfoTitle}>Authorized Roles</Text>
               <View style={styles.roleChips}>
                 {['Admin', 'Faculty', 'Warden'].map((role) => (
                   <View key={role} style={styles.roleChip}>
@@ -127,7 +141,7 @@ export default function LoginScreen() {
             </View>
 
             <Text style={styles.footer}>
-              Credentials are managed by your system administrator.
+              Faculty credentials are set during schedule import. Contact Admin for login help.
             </Text>
           </View>
         </ScrollView>
@@ -139,11 +153,11 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   gradient: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: 20 },
-  brand: { alignItems: 'center', marginBottom: 32 },
+  brand: { alignItems: 'center', marginBottom: 28 },
   logoCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
@@ -158,13 +172,14 @@ const styles = StyleSheet.create({
   },
   appTagline: {
     fontSize: theme.fontSize.md,
-    color: 'rgba(255,255,255,0.88)',
+    color: 'rgba(255,255,255,0.92)',
     marginTop: 4,
     letterSpacing: 0.3,
+    fontWeight: '500',
   },
   appCollege: {
     fontSize: theme.fontSize.sm,
-    color: 'rgba(255,255,255,0.65)',
+    color: 'rgba(255,255,255,0.7)',
     marginTop: 3,
   },
   card: {
@@ -182,9 +197,32 @@ const styles = StyleSheet.create({
   cardSubtitle: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
-    marginBottom: 24,
+    marginBottom: 20,
   },
-  loginBtn: { marginTop: 6 },
+  facultyHintBox: {
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: theme.colors.primary + '10',
+    borderColor: theme.colors.primary + '30',
+    borderWidth: 1,
+    borderRadius: theme.borderRadius.md,
+    padding: 12,
+    marginBottom: 18,
+  },
+  facultyHintTitle: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.primary,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  facultyHintTxt: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.textSecondary,
+    lineHeight: 17,
+  },
+  loginBtn: { marginTop: 4 },
   roleInfo: {
     marginTop: 20,
     padding: 14,

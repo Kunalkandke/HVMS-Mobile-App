@@ -9,6 +9,7 @@ import Toast from 'react-native-toast-message';
 import AppHeader from '../../components/common/AppHeader';
 import { Card, Badge, Divider, InfoRow, LoadingSpinner } from '../../components/common/UIComponents';
 import { visitService } from '../../services/visitService';
+import { formService } from '../../services/formService';
 import { useAuth } from '../../context/AuthContext';
 import { theme, getStatusColor } from '../../utils/theme';
 import {
@@ -24,6 +25,7 @@ export default function VisitDetailScreen() {
   const { visitId } = route.params || {};
 
   const [visit, setVisit] = useState(null);
+  const [forms, setForms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [showRemarkInput, setShowRemarkInput] = useState(false);
@@ -34,7 +36,17 @@ export default function VisitDetailScreen() {
   const loadVisit = async () => {
     try {
       const res = await visitService.getVisitById(visitId);
-      if (res.success) setVisit(res.data);
+      if (res.success) {
+        setVisit(res.data);
+        try {
+          const formRes = await formService.getForms(visitId);
+          if (formRes.success && formRes.data?.forms) {
+            setForms(formRes.data.forms);
+          }
+        } catch (fErr) {
+          console.warn('[VisitDetailScreen] Could not load forms:', fErr);
+        }
+      }
     } catch (err) {
       Toast.show({ type: 'error', text1: 'Error', text2: 'Could not load visit' });
     } finally {
@@ -82,6 +94,22 @@ export default function VisitDetailScreen() {
     visit.status === 'completed' &&
     !visit.isVerified;
 
+  const visitDateObj = visit.checkIn
+    ? new Date(visit.checkIn)
+    : visit.check_in
+    ? new Date(visit.check_in)
+    : visit.visitDate
+    ? new Date(visit.visitDate + 'T00:00:00Z')
+    : null;
+
+  const visitDateStr = visitDateObj
+    ? visitDateObj.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })
+    : '—';
+
   return (
     <SafeAreaView style={styles.container}>
       <AppHeader title="Visit Details" showBack />
@@ -116,12 +144,13 @@ export default function VisitDetailScreen() {
         {/* Visit Info */}
         <Card>
           <Text style={styles.sectionLabel}>Visit Information</Text>
+          <InfoRow label="Visit Date" value={visitDateStr} icon="calendar-outline" />
           <InfoRow label="Purpose" value={getPurposeLabel(visit.purpose)} icon="clipboard-outline" />
           {visit.purposeDetail && (
             <InfoRow label="Details" value={visit.purposeDetail} icon="document-text-outline" />
           )}
-          <InfoRow label="Check-in" value={formatDateTime(visit.checkIn)} icon="log-in-outline" />
-          <InfoRow label="Check-out" value={formatDateTime(visit.checkOut)} icon="log-out-outline" />
+          <InfoRow label="Check-in" value={formatDateTime(visit.checkIn || visit.check_in)} icon="log-in-outline" />
+          <InfoRow label="Check-out" value={formatDateTime(visit.checkOut || visit.check_out)} icon="log-out-outline" />
           <InfoRow
             label="Duration"
             value={visit.duration ? formatDuration(visit.duration) : '—'}
@@ -159,15 +188,67 @@ export default function VisitDetailScreen() {
           </Card>
         )}
 
-        {/* View Forms Button - for admin/warden on completed visits */}
-        {visit.status === 'completed' && (user?.role === 'admin' || user?.role === 'warden') && (
+        {/* Render Submitted Forms Detailed Sections */}
+        {forms.map((f, idx) => {
+          const type = f.formType || f.form_type;
+          const isAnti = type === 'anti_ragging';
+          const title = isAnti ? 'Anti-Ragging Form Details' : 'Mess Feedback Form Details';
+          const icon = isAnti ? 'shield-checkmark-outline' : 'restaurant-outline';
+          const data = f.data || {};
+
+          return (
+            <Card key={f._id || f.id || String(idx)} style={{ borderWidth: 1, borderColor: theme.colors.primary + '30' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <Ionicons name={icon} size={20} color={theme.colors.primary} />
+                <Text style={[styles.sectionLabel, { marginBottom: 0, color: theme.colors.primary }]}>{title}</Text>
+              </View>
+
+              {isAnti ? (
+                <>
+                  <InfoRow label="Discipline Status" value={data.discipline_status || data.disciplineStatus} icon="ribbon-outline" />
+                  <InfoRow label="Cleanliness Status" value={data.cleanliness_status || data.cleanlinessStatus} icon="sparkles-outline" />
+                  <InfoRow label="Overall Environment" value={data.environment_status || data.environmentStatus} icon="leaf-outline" />
+                  <InfoRow label="Senior Interaction" value={data.senior_interaction || data.seniorInteraction} icon="people-outline" />
+                  <InfoRow label="Fresher Interaction" value={data.fresher_interaction || data.fresherInteraction} icon="person-add-outline" />
+                  {data.antiragging_suggestions || data.antiRaggingSuggestions ? (
+                    <InfoRow label="Anti-Ragging Suggestions" value={data.antiragging_suggestions || data.antiRaggingSuggestions} icon="chatbox-ellipses-outline" />
+                  ) : null}
+                  {data.other_suggestions || data.otherSuggestions ? (
+                    <InfoRow label="Other Observations" value={data.other_suggestions || data.otherSuggestions} icon="chatbubble-outline" />
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <InfoRow label="Meal Type" value={data.meal_type || data.mealType} icon="fast-food-outline" />
+                  {data.menu_items || data.menuItems ? (
+                    <InfoRow label="Menu Items" value={data.menu_items || data.menuItems} icon="list-outline" />
+                  ) : null}
+                  <InfoRow label="Tasted Food" value={data.tasted_food || data.tastedFood} icon="restaurant-outline" />
+                  <InfoRow label="Dining Hall Clean" value={data.cleanliness} icon="sparkles-outline" />
+                  <InfoRow label="Plates/Spoons Clean" value={data.plates_clean || data.platesClean} icon="checkmark-done-outline" />
+                  <InfoRow label="Food Served Hot" value={data.food_hot || data.foodHot} icon="flame-outline" />
+                  {data.food_remarks || data.foodRemarks ? (
+                    <InfoRow label="Food Remarks" value={data.food_remarks || data.foodRemarks} icon="chatbox-text-outline" />
+                  ) : null}
+                  <InfoRow label="Overall Feedback" value={data.overall_feedback || data.overallFeedback} icon="thumbs-up-outline" />
+                  {data.improvement_suggestions || data.improvementSuggestions ? (
+                    <InfoRow label="Improvement Areas" value={data.improvement_suggestions || data.improvementSuggestions} icon="trending-up-outline" />
+                  ) : null}
+                </>
+              )}
+            </Card>
+          );
+        })}
+
+        {/* View / Download Forms Button */}
+        {(user?.role === 'admin' || user?.role === 'warden' || user?.role === 'faculty') && (
           <Card>
-            <Text style={styles.sectionLabel}>Submitted Forms</Text>
+            <Text style={styles.sectionLabel}>Forms & Export</Text>
             <Text style={styles.verifyHint}>
-              View the Anti-Ragging and Mess Feedback forms submitted by the faculty.
+              View, edit, or download PDF / Word documents for this visit.
             </Text>
             <Button
-              title="View Forms"
+              title="Open Forms & Export (PDF / Word)"
               onPress={() => navigation.navigate('FormSelection', {
                 visitId: visit._id || visit.id,
                 visitData: {
@@ -179,7 +260,7 @@ export default function VisitDetailScreen() {
                   checkOut: visit.checkOut,
                   duration: visit.duration,
                 },
-                readOnly: true,
+                readOnly: user?.role !== 'faculty' || visit.status === 'completed',
               })}
               variant="outline"
               icon="document-text-outline"

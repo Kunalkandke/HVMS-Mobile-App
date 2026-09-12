@@ -6,7 +6,7 @@ import Constants from 'expo-constants';
 // Windows: open CMD → type ipconfig → look for IPv4 Address under WiFi
 // Mac: open Terminal → type ifconfig en0 → look for inet
 // For production: Use your deployed backend URL
-const DEV_API_URL = 'http://192.168.1.69:5000/api/v1';
+const DEV_API_URL = 'http://192.168.1.66:5000/api/v1';
 const PROD_API_URL = 'https://your-backend-url.com/api/v1'; // Update this for production
 
 export const API_BASE_URL = __DEV__ ? DEV_API_URL : PROD_API_URL;
@@ -63,17 +63,32 @@ async function request(method, path, body) {
   return normalizeIds(data);
 }
 
-// Recursively ensure all objects have _id set (handles backends that return `id` instead of `_id`)
-// Also converts snake_case keys to camelCase for Supabase responses
-function normalizeIds(obj) {
-  if (Array.isArray(obj)) return obj.map(normalizeIds);
+// Recursively ensure all objects have _id set (handles backends that return `id` instead of `_id`).
+// Converts snake_case keys to camelCase for Supabase responses.
+// ONLY preserves raw keys for actual form submission data payloads (objects that contain formType/form_type).
+function normalizeIds(obj, parentKey = null, skipConvert = false) {
+  if (Array.isArray(obj)) return obj.map(item => normalizeIds(item, parentKey, skipConvert));
   if (obj && typeof obj === 'object') {
+    // A "form data payload" is an object that itself has formType/form_type — keep its inner keys raw.
+    if (skipConvert) return obj;
+
     const result = {};
     for (const key of Object.keys(obj)) {
       const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-      result[camelKey] = normalizeIds(obj[key]);
+      const val = obj[key];
+      // If the value is a form submission data payload, preserve it raw
+      const isFormPayload =
+        key === 'data' &&
+        val &&
+        typeof val === 'object' &&
+        !Array.isArray(val) &&
+        (val.formType || val.form_type || parentKey === 'forms');
+
+      result[camelKey] = isFormPayload
+        ? val                                     // keep form payload raw
+        : normalizeIds(val, key, false);          // normal recursive convert
     }
-    // Always ensure _id matches id for consistency
+    // Always ensure _id mirrors id for consistency
     if (result.id) result._id = result.id;
     return result;
   }

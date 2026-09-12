@@ -42,7 +42,7 @@ export default function VisitHistoryScreen() {
     try {
       const res = await visitService.getMyVisits({
         page,
-        limit: 12,
+        limit: 10000,
         status: status || undefined,
       });
       if (res.success) {
@@ -76,10 +76,11 @@ export default function VisitHistoryScreen() {
   };
 
   const handleOpenForms = (visit) => {
+    const vid = visit._id || visit.id;
     navigation.navigate('FormSelection', {
-      visitId: visit._id,
+      visitId: vid,
       visitData: {
-        id: visit._id,
+        id: vid,
         hostel: visit.hostel,
         faculty: visit.faculty,
         purpose: visit.purpose,
@@ -95,7 +96,7 @@ export default function VisitHistoryScreen() {
     <View>
       <VisitCard
         visit={item}
-        onPress={() => navigation.navigate('VisitDetail', { visitId: item._id })}
+        onPress={() => navigation.navigate('VisitDetail', { visitId: item._id || item.id })}
       />
       {/* Forms button on completed visits */}
       {item.status === 'completed' && (
@@ -150,7 +151,7 @@ export default function VisitHistoryScreen() {
       ) : (
         <FlatList
           data={visits}
-          keyExtractor={(item) => item._id}
+          keyExtractor={(item, index) => item._id || item.id || String(index)}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           refreshControl={

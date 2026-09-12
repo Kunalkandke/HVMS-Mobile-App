@@ -11,6 +11,7 @@ import Toast from 'react-native-toast-message';
 import { useAuth } from '../../context/AuthContext';
 import { visitService } from '../../services/visitService';
 import { reportService } from '../../services/reportService';
+import { scheduleService } from '../../services/scheduleService';
 import { StatCard, SectionHeader, EmptyState } from '../../components/common/UIComponents';
 import VisitCard from '../../components/cards/VisitCard';
 import { theme } from '../../utils/theme';
@@ -23,6 +24,7 @@ export default function FacultyDashboardScreen() {
   const [activeVisit, setActiveVisit] = useState(null);
   const [recentVisits, setRecentVisits] = useState([]);
   const [stats, setStats] = useState({ todayCount: 0, monthCount: 0, totalVisits: 0 });
+  const [scheduledVisits, setScheduledVisits] = useState([]);  // upcoming from Excel import
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -36,9 +38,10 @@ export default function FacultyDashboardScreen() {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const [myVisitsRes, dashRes] = await Promise.all([
+      const [myVisitsRes, dashRes, scheduleRes] = await Promise.all([
         visitService.getMyVisits({ limit: 5 }),
         reportService.getDashboardStats(),
+        scheduleService.getMySchedule({ limit: 5 }).catch(() => ({ success: false })),
       ]);
 
       if (myVisitsRes.success) {
@@ -54,6 +57,14 @@ export default function FacultyDashboardScreen() {
           todayCount: dashRes.data.todayCount,
           monthCount: dashRes.data.monthCount,
         }));
+      }
+      if (scheduleRes.success) {
+        // Show only upcoming + today visits (next 3)
+        const today = new Date().toISOString().slice(0, 10);
+        const upcoming = (scheduleRes.data.visits || [])
+          .filter(v => v.visitDate >= today && v.status === 'scheduled')
+          .slice(0, 3);
+        setScheduledVisits(upcoming);
       }
     } catch (err) {
       Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to load dashboard' });
@@ -157,6 +168,65 @@ export default function FacultyDashboardScreen() {
               onPress={() => navigation.navigate('Profile')}
             />
           </View>
+        </View>
+
+        {/* My Assigned Schedule */}
+        <View style={styles.section}>
+          <SectionHeader
+            title="My Hostel Visits"
+            action="View All"
+            onAction={() => navigation.navigate('FacultySchedule')}
+          />
+          {scheduledVisits.length === 0 ? (
+            <View style={styles.scheduleEmpty}>
+              <Ionicons name="calendar-outline" size={32} color={theme.colors.textMuted} />
+              <Text style={styles.scheduleEmptyTxt}>No upcoming assigned visits</Text>
+            </View>
+          ) : (
+            scheduledVisits.map((sv, i) => {
+              const today = new Date().toISOString().slice(0, 10);
+              const isToday = sv.visitDate === today;
+              const roundColors = {
+                'Round-I':'#1565c0','Round-II':'#2e7d32','Round-III':'#e65100','Round-IV':'#6a1b9a',
+              };
+              const rc = roundColors[sv.round] || theme.colors.primary;
+              return (
+                <TouchableOpacity
+                  key={sv.id || i}
+                  style={[styles.scheduleCard, isToday && styles.scheduleCardToday]}
+                  onPress={() => navigation.navigate('FacultySchedule')}
+                  activeOpacity={0.82}
+                >
+                  {isToday && (
+                    <View style={styles.todayTag}>
+                      <Text style={styles.todayTagTxt}>TODAY</Text>
+                    </View>
+                  )}
+                  <View style={styles.scheduleCardRow}>
+                    <View style={styles.scheduleDateCol}>
+                      <Text style={styles.scheduleDateNum}>{sv.visitDate?.slice(8, 10) || '—'}</Text>
+                      <Text style={styles.scheduleDateMon}>
+                        {sv.visitDate
+                          ? new Date(sv.visitDate + 'T00:00:00Z')
+                              .toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' })
+                          : ''}
+                      </Text>
+                    </View>
+                    <View style={styles.scheduleCardBody}>
+                      <View style={[styles.scheduleRoundPill, { backgroundColor: rc + '15', borderColor: rc + '40' }]}>
+                        <Text style={[styles.scheduleRoundTxt, { color: rc }]}>{sv.round}</Text>
+                      </View>
+                      <Text style={styles.scheduleHostel} numberOfLines={1}>
+                        {sv.hostel?.name || sv.hostelType || '—'}
+                      </Text>
+                      <Text style={styles.scheduleDow}>{sv.dayOfWeek || ''}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={theme.colors.textMuted} />
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
 
         {/* Recent Visits */}
@@ -298,4 +368,23 @@ const styles = StyleSheet.create({
     marginTop: 3,
     textAlign: 'center',
   },
+  // Scheduled visits section
+  scheduleEmpty: { alignItems: 'center', paddingVertical: 20, gap: 8 },
+  scheduleEmptyTxt: { fontSize: theme.fontSize.sm, color: theme.colors.textMuted },
+  scheduleCard: {
+    backgroundColor: theme.colors.surface, borderRadius: theme.borderRadius.lg,
+    marginBottom: 8, overflow: 'hidden', ...theme.shadow.sm,
+  },
+  scheduleCardToday: { borderWidth: 1.5, borderColor: theme.colors.success + '60' },
+  todayTag: { backgroundColor: theme.colors.success, paddingVertical: 3, paddingHorizontal: 12 },
+  todayTagTxt: { fontSize: theme.fontSize.xs, fontWeight: theme.fontWeight.bold, color: '#fff', letterSpacing: 0.8 },
+  scheduleCardRow: { flexDirection: 'row', alignItems: 'center', padding: 12 },
+  scheduleDateCol: { width: 44, alignItems: 'center', marginRight: 12 },
+  scheduleDateNum: { fontSize: theme.fontSize.xl, fontWeight: theme.fontWeight.bold, color: theme.colors.textPrimary },
+  scheduleDateMon: { fontSize: theme.fontSize.xs, color: theme.colors.textSecondary, fontWeight: theme.fontWeight.semiBold, textTransform: 'uppercase' },
+  scheduleCardBody: { flex: 1 },
+  scheduleRoundPill: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: theme.borderRadius.full, borderWidth: 1, marginBottom: 4 },
+  scheduleRoundTxt: { fontSize: theme.fontSize.xs, fontWeight: theme.fontWeight.bold },
+  scheduleHostel: { fontSize: theme.fontSize.md, fontWeight: theme.fontWeight.semiBold, color: theme.colors.textPrimary },
+  scheduleDow: { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, marginTop: 2 },
 });

@@ -100,6 +100,7 @@ export default function ManageUsersScreen() {
 
   const renderUser = ({ item }) => {
     const roleColor = getRoleColor(item.role);
+    const isImported = item.importSource === 'excel_import';
     return (
       <View style={styles.userCard}>
         <View style={styles.userHeader}>
@@ -107,9 +108,30 @@ export default function ManageUsersScreen() {
             <Text style={[styles.avatarText, { color: roleColor }]}>{getInitials(item.name)}</Text>
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{item.name}</Text>
-            <Text style={styles.userEmail}>{item.email}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <Text style={styles.userName}>{item.name}</Text>
+              {isImported && (
+                <View style={styles.importedTag}>
+                  <Text style={styles.importedTagTxt}>Excel</Text>
+                </View>
+              )}
+            </View>
+            {/* Faculty code badge for imported faculty */}
+            {item.facultyCode ? (
+              <View style={styles.facultyCodeRow}>
+                <Ionicons name="id-card-outline" size={12} color={theme.colors.primary} />
+                <Text style={styles.facultyCode}>{item.facultyCode}</Text>
+                {item.mustChangePassword && (
+                  <View style={styles.pwdBadge}>
+                    <Text style={styles.pwdBadgeTxt}>Pwd change required</Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <Text style={styles.userEmail}>{item.email || '— No email —'}</Text>
+            )}
             <Text style={styles.userDept}>{item.department || item.assignedHostel?.name || ''}</Text>
+            {item.phone ? <Text style={styles.userPhone}>📱 {item.phone}</Text> : null}
           </View>
           <View style={styles.userMeta}>
             <Badge label={getRoleLabel(item.role)} color={roleColor} size="sm" />
@@ -234,9 +256,16 @@ const styles = StyleSheet.create({
   userInfo: { flex: 1 },
   userName: { fontSize: theme.fontSize.md, fontWeight: theme.fontWeight.semiBold, color: theme.colors.textPrimary },
   userEmail: { fontSize: theme.fontSize.sm, color: theme.colors.textSecondary, marginTop: 1 },
-  userDept: { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, marginTop: 1 },
+  userDept:  { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, marginTop: 1 },
+  userPhone: { fontSize: theme.fontSize.xs, color: theme.colors.textMuted, marginTop: 1 },
   userMeta: { alignItems: 'flex-end', gap: 6 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
+  importedTag: { backgroundColor: theme.colors.secondary + '20', borderRadius: theme.borderRadius.full, paddingHorizontal: 6, paddingVertical: 1 },
+  importedTagTxt: { fontSize: 10, fontWeight: theme.fontWeight.bold, color: theme.colors.secondary },
+  facultyCodeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2, flexWrap: 'wrap' },
+  facultyCode: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.bold, color: theme.colors.primary },
+  pwdBadge: { backgroundColor: theme.colors.warningLight, borderRadius: theme.borderRadius.full, paddingHorizontal: 6, paddingVertical: 1 },
+  pwdBadgeTxt: { fontSize: 10, color: theme.colors.warning, fontWeight: theme.fontWeight.semiBold },
   userActions: { flexDirection: 'row', gap: 8 },
   actionBtn: {
     flex: 1,

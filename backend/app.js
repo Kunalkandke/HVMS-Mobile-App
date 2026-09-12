@@ -46,11 +46,12 @@ app.use('/api/v1/auth', authLimiter);
 app.use('/api/', generalLimiter);
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
-app.use('/api/v1/auth',    require('./routes/authRoutes'));
-app.use('/api/v1/visits',  require('./routes/visitRoutes'));
-app.use('/api/v1/hostels', require('./routes/hostelRoutes'));
-app.use('/api/v1/users',   require('./routes/userRoutes'));
-app.use('/api/v1/reports', require('./routes/reportRoutes'));
+app.use('/api/v1/auth',     require('./routes/authRoutes'));
+app.use('/api/v1/visits',   require('./routes/visitRoutes'));
+app.use('/api/v1/hostels',  require('./routes/hostelRoutes'));
+app.use('/api/v1/users',    require('./routes/userRoutes'));
+app.use('/api/v1/reports',  require('./routes/reportRoutes'));
+app.use('/api/v1/schedule', require('./routes/scheduleRoutes'));
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {

@@ -17,6 +17,7 @@ import EndVisitScreen from '../screens/faculty/EndVisitScreen';
 import VisitHistoryScreen from '../screens/faculty/VisitHistoryScreen';
 import FormSelectionScreen from '../screens/faculty/FormSelectionScreen';
 import FormFillScreen from '../screens/faculty/FormFillScreen';
+import FacultyScheduleScreen from '../screens/faculty/FacultyScheduleScreen';
 
 // Admin Screens
 import AdminDashboardScreen from '../screens/admin/AdminDashboardScreen';
@@ -26,6 +27,8 @@ import ReportsScreen from '../screens/admin/ReportsScreen';
 import CreateUserScreen from '../screens/admin/CreateUserScreen';
 import CreateHostelScreen from '../screens/admin/CreateHostelScreen';
 import AllVisitsScreen from '../screens/admin/AllVisitsScreen';
+import ImportScheduleScreen from '../screens/admin/ImportScheduleScreen';
+import ScheduleManagementScreen from '../screens/admin/ScheduleManagementScreen';
 
 // Warden Screens
 import WardenDashboardScreen from '../screens/warden/WardenDashboardScreen';
@@ -57,16 +60,18 @@ function FacultyTabs() {
         tabBarIcon: ({ color, focused }) => {
           const icons = {
             Dashboard: focused ? 'home' : 'home-outline',
-            Visits: focused ? 'document-text' : 'document-text-outline',
-            Profile: focused ? 'person' : 'person-outline',
+            Schedule:  focused ? 'calendar' : 'calendar-outline',
+            Visits:    focused ? 'document-text' : 'document-text-outline',
+            Profile:   focused ? 'person' : 'person-outline',
           };
           return <Ionicons name={icons[route.name] || 'ellipse'} size={22} color={color} />;
         },
       })}
     >
       <Tab.Screen name="Dashboard" component={FacultyDashboardScreen} />
-      <Tab.Screen name="Visits" component={VisitHistoryScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Schedule"  component={FacultyScheduleScreen} />
+      <Tab.Screen name="Visits"    component={VisitHistoryScreen} />
+      <Tab.Screen name="Profile"   component={ProfileScreen} />
     </Tab.Navigator>
   );
 }
@@ -153,11 +158,16 @@ export default function MainNavigator() {
       <Stack.Screen name="FormSelection" component={FormSelectionScreen} />
       <Stack.Screen name="FormFill" component={FormFillScreen} />
 
+      {/* Faculty schedule */}
+      <Stack.Screen name="FacultySchedule" component={FacultyScheduleScreen} />
+
       {/* Admin screens */}
       <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
       <Stack.Screen name="CreateUser" component={CreateUserScreen} />
       <Stack.Screen name="CreateHostel" component={CreateHostelScreen} />
       <Stack.Screen name="AllVisits" component={AllVisitsScreen} />
+      <Stack.Screen name="ImportSchedule" component={ImportScheduleScreen} />
+      <Stack.Screen name="ScheduleManagement" component={ScheduleManagementScreen} />
     </Stack.Navigator>
   );
 }

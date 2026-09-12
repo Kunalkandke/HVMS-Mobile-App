@@ -108,6 +108,49 @@ export default function AdminDashboardScreen() {
             </View>
           </View>
 
+          {/* Schedule & Faculty Import — Phase 1 */}
+          <View style={styles.section}>
+            <SectionHeader title="Schedule & Faculty Import" />
+            <TouchableOpacity
+              style={styles.importPrimaryBtn}
+              onPress={() => navigation.navigate('ImportSchedule')}
+              activeOpacity={0.82}
+            >
+              <View style={styles.importPrimaryIcon}>
+                <Ionicons name="cloud-upload-outline" size={26} color="#fff" />
+              </View>
+              <View style={styles.importPrimaryText}>
+                <Text style={styles.importPrimaryLabel}>Import Excel Schedule</Text>
+                <Text style={styles.importPrimaryHint}>Upload Boys or Girls hostel .xlsx file</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+            </TouchableOpacity>
+
+            <View style={styles.importSecondaryRow}>
+              <TouchableOpacity
+                style={styles.importSecondaryBtn}
+                onPress={() => navigation.navigate('ScheduleManagement', { initialTab: 'uploads' })}
+                activeOpacity={0.82}
+              >
+                <Ionicons name="people-outline" size={20} color={theme.colors.roleFaculty} />
+                <Text style={[styles.importSecondaryLabel, { color: theme.colors.roleFaculty }]}>
+                  View Faculty Records
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.importSecondaryBtn}
+                onPress={() => navigation.navigate('ScheduleManagement')}
+                activeOpacity={0.82}
+              >
+                <Ionicons name="calendar-outline" size={20} color={theme.colors.secondary} />
+                <Text style={[styles.importSecondaryLabel, { color: theme.colors.secondary }]}>
+                  View Schedule / Records
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* Hostel-wise summary */}
           {stats.hostelWise?.length > 0 && (
             <View style={styles.section}>
@@ -208,4 +251,28 @@ const styles = StyleSheet.create({
   hostelDot: { width: 10, height: 10, borderRadius: 5, marginRight: 10 },
   hostelName: { flex: 1, fontSize: theme.fontSize.sm, color: theme.colors.textPrimary, fontWeight: theme.fontWeight.medium },
   hostelCount: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.bold, color: theme.colors.primary },
+  // Schedule import section
+  importPrimaryBtn: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: theme.colors.primary,
+    borderRadius: theme.borderRadius.lg,
+    padding: 16, marginBottom: 10,
+    ...theme.shadow.md,
+  },
+  importPrimaryIcon: {
+    width: 46, height: 46, borderRadius: 23,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center', alignItems: 'center', marginRight: 14,
+  },
+  importPrimaryText: { flex: 1 },
+  importPrimaryLabel: { fontSize: theme.fontSize.md, fontWeight: theme.fontWeight.bold, color: '#fff' },
+  importPrimaryHint:  { fontSize: theme.fontSize.xs, color: 'rgba(255,255,255,0.70)', marginTop: 2 },
+  importSecondaryRow: { flexDirection: 'row', gap: 10 },
+  importSecondaryBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    padding: 14, ...theme.shadow.sm,
+  },
+  importSecondaryLabel: { fontSize: theme.fontSize.sm, fontWeight: theme.fontWeight.semiBold, flex: 1 },
 });

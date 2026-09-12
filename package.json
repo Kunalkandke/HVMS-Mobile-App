@@ -1,5 +1,11 @@
 {
+  "scripts": {
+    "start": "cd mobile-app && npx expo start --clear",
+    "android": "cd mobile-app && npx expo start --android",
+    "ios": "cd mobile-app && npx expo start --ios"
+  },
   "dependencies": {
+    "expo": "^57.0.22",
     "react-native-svg": "^15.15.4"
   }
 }

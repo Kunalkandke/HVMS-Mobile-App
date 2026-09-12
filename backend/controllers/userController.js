@@ -14,6 +14,7 @@ exports.getAllUsers = async (req, res, next) => {
       .select(`
         id, name, email, role, department, phone, profile_photo,
         is_active, must_change_password, created_at,
+        faculty_code, import_source,
         assigned_hostel_id,
         hostels:assigned_hostel_id ( id, name, type )
       `, { count: 'exact' })
@@ -45,6 +46,7 @@ exports.getUserById = async (req, res, next) => {
       .select(`
         id, name, email, role, department, phone, profile_photo,
         is_active, must_change_password, created_at,
+        faculty_code, import_source,
         assigned_hostel_id,
         hostels:assigned_hostel_id ( id, name, type, location )
       `)

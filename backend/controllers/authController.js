@@ -22,18 +22,51 @@ const getUserWithHostel = async (userId) => {
 // ─── LOGIN ────────────────────────────────────────────────────────────────────
 exports.login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password)
-      return res.status(400).json({ success: false, message: 'Email and password required' });
+    // Accept either { email, password } or { facultyCode, password }
+    // The mobile app sends the "email" field but it may contain a faculty code (FAC001)
+    const { email, password, facultyCode } = req.body;
+    const identifier = (facultyCode || email || '').trim();
 
-    // Fetch user including hashed password
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id, name, email, password, role, department, phone, profile_photo, assigned_hostel_id, is_active, must_change_password')
-      .eq('email', email.toLowerCase().trim())
-      .single();
+    if (!identifier || !password)
+      return res.status(400).json({ success: false, message: 'Login ID and password are required' });
 
-    if (error || !user)
+    const selectFields = 'id, name, email, password, role, department, phone, profile_photo, assigned_hostel_id, is_active, must_change_password, faculty_code, import_source';
+
+    // Determine if identifier looks like a faculty code (FAC followed by digits)
+    const isFacultyCode = /^FAC\d+$/i.test(identifier);
+
+    let user = null;
+    let fetchError = null;
+
+    if (isFacultyCode) {
+      // Login by faculty code
+      const { data, error } = await supabase
+        .from('users')
+        .select(selectFields)
+        .ilike('faculty_code', identifier)
+        .single();
+      user = data; fetchError = error;
+    } else {
+      // Login by email
+      const { data, error } = await supabase
+        .from('users')
+        .select(selectFields)
+        .eq('email', identifier.toLowerCase())
+        .single();
+      user = data; fetchError = error;
+
+      // If not found by email, try faculty_code as fallback (in case Admin typed FAC001 in email field)
+      if ((fetchError || !user) && /^FAC\d+$/i.test(identifier)) {
+        const { data: d2, error: e2 } = await supabase
+          .from('users')
+          .select(selectFields)
+          .ilike('faculty_code', identifier)
+          .single();
+        user = d2; fetchError = e2;
+      }
+    }
+
+    if (fetchError || !user)
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     if (!user.is_active)
       return res.status(401).json({ success: false, message: 'Account deactivated. Contact administrator.' });
@@ -55,7 +88,7 @@ exports.login = async (req, res, next) => {
       assignedHostel = hostel || null;
     }
 
-    auditLogger(user.id, 'LOGIN', null, null, { email: user.email }, req.ip);
+    auditLogger(user.id, 'LOGIN', null, null, { email: user.email, facultyCode: user.faculty_code }, req.ip);
 
     const { password: _pw, ...safeUser } = user;
     return res.json({
@@ -73,6 +106,8 @@ exports.login = async (req, res, next) => {
           profilePhoto: user.profile_photo,
           assignedHostel,
           mustChangePassword: user.must_change_password,
+          facultyCode: user.faculty_code || null,
+          importSource: user.import_source || 'manual',
         },
       },
     });
